@@ -25,6 +25,7 @@ class VariousTimeDeque:
         self.data_10min = [deque(maxlen=MAXLEN) for _ in range(numdata)]
         self.time_1hour = deque(maxlen=MAXLEN)
         self.data_1hour = [deque(maxlen=MAXLEN) for _ in range(numdata)]
+        self.update_data([0] * numdata, time.time())
         
     def update_data(self, data, time):
         if len(data) != self.numdata:
@@ -56,6 +57,34 @@ class VariousTimeDeque:
             for i in range(self.numdata):
                 self.data_1hour[i].append(data[i])
 
+    def get_time_deque(self, interval):
+        if interval == 1:
+            return self.time_1s
+        elif interval == 60:
+            return self.time_1min
+        elif interval == 600:
+            return self.time_10min
+        elif interval == 3600:
+            return self.time_1hour
+        return None
+    
+    def get_data_deque(self, interval):
+        if interval == 1:
+            return self.data_1s
+        elif interval == 60:
+            return self.data_1min
+        elif interval == 600:
+            return self.data_10min
+        elif interval == 3600:
+            return self.data_1hour
+        return None
+    
+    def get_last_time(self):
+        return self.time_1s[-1]
+    
+    def get_last_data(self):
+        return [x[-1] for x in self.data_1s]
+
 class TotalPlotter:
     def __init__(self, master):
         self.master = master
@@ -67,37 +96,8 @@ class TotalPlotter:
         self.create_widgets()
 
         # Deques for storing values
-        self.time_rfm_1s: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1s: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1s: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1s:list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_1s.append(datetime.fromtimestamp(time.time()))
-        for i in range(3):
-            self.data_rfm_1s[i].append(0)
-        self.time_drc91c_1s.append(datetime.fromtimestamp(time.time()))
-        for i in range(2):
-            self.data_drc91c_1s[i].append(0)
-        
-        self.time_rfm_1min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_10min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_10min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_10min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_10min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_1hour: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1hour: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1hour: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1hour: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-
-        self.time_rfm_plot = self.time_rfm_1s
-        self.data_rfm_plot = self.data_rfm_1s
-        self.time_drc91c_plot = self.time_drc91c_1s
-        self.data_drc91c_plot = self.data_drc91c_1s
+        self.rfm_deque = VariousTimeDeque(3)
+        self.drc91c_deque = VariousTimeDeque(2)
 
         # Start the data fetching thread
         self.last_fetch_time = time.time()
@@ -107,8 +107,6 @@ class TotalPlotter:
         
         self.rfm_status_code = None
         self.drc91c_status_code = None
-        
-        self.set_test_data()
         
         self.update_interval(None)
         self.main_loop()
@@ -189,36 +187,27 @@ class TotalPlotter:
 
     def update_interval(self, event):
         interval = self.get_interval()
-        if interval == 1:
-            self.time_rfm_plot = self.time_rfm_1s
-            self.data_rfm_plot = self.data_rfm_1s
-            self.time_drc91c_plot = self.time_drc91c_1s
-            self.data_drc91c_plot = self.data_drc91c_1s
-        elif interval == 60:
-            self.time_rfm_plot = self.time_rfm_1min
-            self.data_rfm_plot = self.data_rfm_1min
-            self.time_drc91c_plot = self.time_drc91c_1min
-            self.data_drc91c_plot = self.data_drc91c_1min
-        elif interval == 600:
-            self.time_rfm_plot = self.time_rfm_10min
-            self.data_rfm_plot = self.data_rfm_10min
-            self.time_drc91c_plot = self.time_drc91c_10min
-            self.data_drc91c_plot = self.data_drc91c_10min
-        elif interval == 3600:
-            self.time_rfm_plot = self.time_rfm_1hour
-            self.data_rfm_plot = self.data_rfm_1hour
-            self.time_drc91c_plot = self.time_drc91c_1hour
-            self.data_drc91c_plot = self.data_drc91c_1hour
+        self.time_rfm_plot = self.rfm_deque.get_time_deque(interval)
+        self.data_rfm_plot = self.rfm_deque.get_data_deque(interval)
+        self.time_drc91c_plot = self.drc91c_deque.get_time_deque(interval)
+        self.data_drc91c_plot = self.drc91c_deque.get_data_deque(interval)
         
         if len(self.time_rfm_plot) <= 2:
             return
         self.update_plot()
     
     def fetch_loop(self):
-        self.fetch_data()
-        self.master.after(1000, self.fetch_loop)
+        fetch_start_time = time.time()
+        values_rfm, rfm_time, values_drc91c, drc91c_time = self.fetch_data()
+        print(values_rfm, rfm_time, values_drc91c, drc91c_time)
+        self.rfm_deque.update_data(values_rfm, rfm_time)
+        self.drc91c_deque.update_data(values_drc91c, drc91c_time)
+        fetch_finished_time = time.time()
+        remaining_time_to_1000ms = 1000 - max(0, int((fetch_finished_time - fetch_start_time) * 1000))
+        self.master.after(remaining_time_to_1000ms, self.fetch_loop)
     
     def main_loop(self):
+        main_loop_start_time = time.time()
         if time.time() - self.last_fetch_time > 1:
             self.last_fetch_time = time.time()
             self.update_display()
@@ -226,49 +215,24 @@ class TotalPlotter:
                 self.update_plot()
         if time.time() - self.last_1min_time > 60:
             self.last_1min_time = time.time()
-            self.update_1min_data()
             if self.get_interval() == 60:
                 self.update_plot()
         if time.time() - self.last_10min_time > 600:
             self.last_10min_time = time.time()
-            self.update_10min_data()
             if self.get_interval() == 600:
                 self.update_plot()
         if time.time() - self.last_1hour_time > 3600:
             self.last_1hour_time = time.time()
-            self.update_1hour_data()
             if self.get_interval() == 3600:
                 self.update_plot()
+        main_loop_finished_time = time.time()
+        print(f"Main loop time: {main_loop_finished_time - main_loop_start_time:.3f} s")
         # Call this method again after 1 second
         self.master.after(1000, self.main_loop)
 
     def start(self):
         self.data_fetch_thread = threading.Thread(target=self.fetch_loop)
         self.data_fetch_thread.start()
-
-    def update_1min_data(self):
-        self.time_rfm_1min.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_1min[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_1min.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_1min[i].append(self.data_drc91c_1s[i][-1])
-    
-    def update_10min_data(self):
-        self.time_rfm_10min.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_10min[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_10min.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_10min[i].append(self.data_drc91c_1s[i][-1])
-    
-    def update_1hour_data(self):
-        self.time_rfm_1hour.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_1hour[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_1hour.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_1hour[i].append(self.data_drc91c_1s[i][-1])
 
     def parse_temperature(self, value: str) -> float:
         return float(value[1:7])
@@ -286,23 +250,17 @@ class TotalPlotter:
                 list_of_str = [json['Tip'], json['Shield'], json['Vent']]
                 return [float(x) for x in list_of_str]
             else:
-                print(f"Error fetching from RFM: {response.status_code}")
                 return [0, 0, 0]
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             self.rfm_status_code = 'ConnectionError'
-            print(f"Connection error fetching from RFM: {e}")
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             self.rfm_status_code = 'Timeout'
-            print(f"Timeout error fetching from RFM: {e}")
-        except requests.exceptions.HTTPError as e:
+        except requests.exceptions.HTTPError:
             self.rfm_status_code = 'HTTPError'
-            print(f"HTTP error fetching from RFM: {e}")
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             self.rfm_status_code = 'RequestException'
-            print(f"General error fetching from RFM: {e}")
-        except Exception as e:
+        except Exception:
             self.rfm_status_code = 'Critical'
-            print(f"Critical error fetching from RFM: {e}")
         return [0, 0, 0]
 
     def get_data_from_drc91c(self):
@@ -318,35 +276,26 @@ class TotalPlotter:
                 list_of_str = [json['valueA'], json['valueB']]
                 return [self.parse_temperature(x) for x in list_of_str]
             else:
-                print(f"Error fetching from DRC91C: {response.status_code}")
                 return [0, 0]
-        except requests.exceptions.ConnectionError as e:
+        except requests.exceptions.ConnectionError:
             self.drc91c_status_code = 'ConnectionError'
-            print(f"Connection error fetching from RFM: {e}")
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             self.drc91c_status_code = 'Timeout'
-            print(f"Timeout error fetching from RFM: {e}")
-        except requests.exceptions.HTTPError as e:
+        except requests.exceptions.HTTPError:
             self.drc91c_status_code = 'HTTPError'
-            print(f"HTTP error fetching from RFM: {e}")
-        except requests.exceptions.RequestException as e:
+        except requests.exceptions.RequestException:
             self.drc91c_status_code = 'RequestException'
-            print(f"General error fetching from RFM: {e}")
-        except Exception as e:
+        except Exception:
             self.drc91c_status_code = 'Critical'
-            print(f"Critical error fetching from RFM: {e}")
-        return [0, 0, 0]
+        return [0, 0]
 
     def fetch_data(self):
         values_rfm = self.get_data_from_rfm()
-        for i in range(3):
-            self.data_rfm_1s[i].append(values_rfm[i])
-        self.time_rfm_1s.append(datetime.fromtimestamp(time.time()))
+        rfm_time = time.time()
 
         values_drc91c = self.get_data_from_drc91c()
-        for i in range(2):
-            self.data_drc91c_1s[i].append(values_drc91c[i])
-        self.time_drc91c_1s.append(datetime.fromtimestamp(time.time()))
+        drc91c_time = time.time()
+        return values_rfm, rfm_time, values_drc91c, drc91c_time
 
     def get_interval(self):
         interval_str = self.interval_combo.get()
@@ -363,19 +312,19 @@ class TotalPlotter:
     def make_error_sentence(self, error_code):
         try:
             error_code = int(error_code)
-            return f"Err({error_code})"
+            return f": Err({error_code})"
         except ValueError:
-            return error_code
+            return f": {error_code}"
 
     def update_display(self):
-        self.tip_data_label.config(text=f": {self.data_rfm_1s[0][-1]:.2f} L/min")
-        self.shield_data_label.config(text=f": {self.data_rfm_1s[1][-1]:.2f} L/min")
-        self.vent_data_label.config(text=f": {self.data_rfm_1s[2][-1]:.2f} L/min")
-        self.head_data_label.config(text=f": {self.data_drc91c_1s[0][-1]:.2f} K")
-        self.cold_tip_data_label.config(text=f": {self.data_drc91c_1s[1][-1]:.2f} K")
+        self.tip_data_label.config(text=f": {self.rfm_deque.get_last_data()[0]:.2f} L/min")
+        self.shield_data_label.config(text=f": {self.rfm_deque.get_last_data()[1]:.2f} L/min")
+        self.vent_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
+        self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
+        self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[1]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
-        self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == 200 else self.make_error_sentence(self.rfm_status_code)}")
-        self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == 200 else self.make_error_sentence(self.drc91c_status_code)}")
+        # self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == 200 else self.make_error_sentence(self.rfm_status_code)}")
+        # self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == 200 else self.make_error_sentence(self.drc91c_status_code)}")
     
     def update_plot(self):
         if len(self.time_rfm_plot) <= 2:
@@ -466,43 +415,6 @@ class TotalPlotter:
         self.ax.xaxis.set_major_formatter(formatter)
         
         self.figure.autofmt_xdate()
-
-    def set_test_data(self):
-        start_time = time.time() - MAXLEN * 3600
-        for i in range(MAXLEN):
-            self.data_rfm_1s[0].append(0.5)
-            self.data_rfm_1s[1].append(0.3)
-            self.data_rfm_1s[2].append(0.7)
-            self.data_drc91c_1s[0].append(300)
-            self.data_drc91c_1s[1].append(400)
-            self.data_rfm_1min[0].append(0.5)
-            self.data_rfm_1min[1].append(0.3)
-            self.data_rfm_1min[2].append(0.7)
-            self.data_drc91c_1min[0].append(300)
-            self.data_drc91c_1min[1].append(400)
-            self.data_rfm_10min[0].append(0.5)
-            self.data_rfm_10min[1].append(0.3)
-            self.data_rfm_10min[2].append(0.7)
-            self.data_drc91c_10min[0].append(300)
-            self.data_drc91c_10min[1].append(400)
-            self.data_rfm_1hour[0].append(0.5)
-            self.data_rfm_1hour[1].append(0.3)
-            self.data_rfm_1hour[2].append(0.7)
-            self.data_drc91c_1hour[0].append(300)
-            self.data_drc91c_1hour[1].append(400)
-            
-        for i in range(MAXLEN * 3600):
-            self.time_rfm_1s.append(datetime.fromtimestamp(start_time + i))
-            self.time_drc91c_1s.append(datetime.fromtimestamp(start_time + i))
-            if i % 60 == 0:
-                self.time_rfm_1min.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_1min.append(datetime.fromtimestamp(start_time + i))
-            if i % 600 == 0:
-                self.time_rfm_10min.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_10min.append(datetime.fromtimestamp(start_time + i))
-            if i % 3600 == 0:
-                self.time_rfm_1hour.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_1hour.append(datetime.fromtimestamp(start_time + i))
 
 if __name__ == "__main__":
     root = tk.Tk()
