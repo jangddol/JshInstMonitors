@@ -183,7 +183,7 @@ class TotalPlotter:
 
         self.tip_data_label = self.create_value_labels("• Tip", "L/min", self.data_frame, 0)
         self.shield_data_label = self.create_value_labels("• Shield", "L/min", self.data_frame, 1)
-        self.vent_data_label = self.create_value_labels("• Vent", "L/min", self.data_frame, 2)
+        self.bypass_data_label = self.create_value_labels("• Bypass", "L/min", self.data_frame, 2)
         self.head_data_label = self.create_value_labels("• Head", "K", self.data_frame, 3)
         self.cold_tip_data_label = self.create_value_labels("• Cold Tip", "K", self.data_frame, 4)
 
@@ -302,7 +302,7 @@ class TotalPlotter:
             self.rfm_status_code = response.status_code
             if response.status_code == 200:
                 json = response.json()
-                list_of_str = [json['Tip'], json['Shield'], json['Vent']]
+                list_of_str = [json['Tip'], json['Shield'], json['Bypass']]
                 return [float(x) for x in list_of_str]
             else:
                 print(f"Error fetching from RFM: {response.status_code}")
@@ -385,7 +385,7 @@ class TotalPlotter:
     def update_display(self):
         self.tip_data_label.config(text=f": {self.rfm_deque.get_last_data()[0]:.2f} L/min")
         self.shield_data_label.config(text=f": {self.rfm_deque.get_last_data()[1]:.2f} L/min")
-        self.vent_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
+        self.bypass_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
         self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
         self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
@@ -403,7 +403,7 @@ class TotalPlotter:
         
         self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[0], marker='o', color='green', label="Tip", markersize=marker_size)
         self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[1], marker='o', color='blue', label="Shield", markersize=marker_size)
-        self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[2], marker='o', color='purple', label="Vent", markersize=marker_size)
+        self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[2], marker='o', color='purple', label="Bypass", markersize=marker_size)
         
         self.ax2.plot(self.time_drc91c_plot, self.data_drc91c_plot[0], marker='o', color='red', label="Head", markersize=marker_size)
         self.ax2.plot(self.time_drc91c_plot, self.data_drc91c_plot[1], marker='o', color='orange', label="Cold Tip", markersize=marker_size)

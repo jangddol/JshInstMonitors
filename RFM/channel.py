@@ -21,13 +21,13 @@ def convert_int_to_channel(ch):
 class ChannelName(enum.Enum):
     Tip = "Tip"
     Shield = "Shield"
-    Vent = "Vent"
+    Bypass = "Bypass"
     
     def get_column(self):
         if self == ChannelName.Tip:
             return 0
         if self == ChannelName.Shield:
             return 1
-        if self == ChannelName.Vent:
+        if self == ChannelName.Bypass:
             return 2
         return -1

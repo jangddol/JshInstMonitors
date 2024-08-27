@@ -92,7 +92,7 @@ class ScheduleWidget:
         self.minute_spinbox.grid(row=1, column=5)
 
         tk.Label(self.frame, text="채널:").grid(row=1, column=6)
-        tk.OptionMenu(self.frame, self.channel_var, ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Vent.value).grid(row=1, column=7)
+        tk.OptionMenu(self.frame, self.channel_var, ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Bypass.value).grid(row=1, column=7)
 
         tk.Label(self.frame, text="동작:").grid(row=1, column=8)
         action_menu = tk.OptionMenu(self.frame, self.action_var, Action.On.value, Action.Off.value, Action.Setpoint.value, command=self.update_number_entry)

@@ -299,7 +299,7 @@ class RFMApp:
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=self.channelBkgColors[i], outline="")
 
     def displayTexts(self):
-        COLUMNNAME = [ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Vent.value]
+        COLUMNNAME = [ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Bypass.value]
         if not self.mn:
             line = '.' * 100
             
@@ -525,7 +525,7 @@ if __name__ == "__main__":
 
     @app.route('/get_value', methods=['GET'])
     def get_value():
-        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Vent': rfmapp.last_flow_values[2]})
+        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2]})
 
     def run_app():
         # GUI 애플리케이션 실행
