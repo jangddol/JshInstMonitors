@@ -26,6 +26,8 @@ class VariousTimeDeque:
         self.time_1hour = deque(maxlen=MAXLEN)
         self.data_1hour = [deque(maxlen=MAXLEN) for _ in range(numdata)]
         
+        self.update_data([0] * numdata, time.time())
+        
     def update_data(self, data, time):
         if len(data) != self.numdata:
             raise ValueError("Data length mismatch")
@@ -55,6 +57,34 @@ class VariousTimeDeque:
             self.time_1hour.append(_time)
             for i in range(self.numdata):
                 self.data_1hour[i].append(data[i])
+
+    def get_time_deque(self, interval):
+        if interval == 1:
+            return self.time_1s
+        elif interval == 60:
+            return self.time_1min
+        elif interval == 600:
+            return self.time_10min
+        elif interval == 3600:
+            return self.time_1hour
+        return None
+    
+    def get_data_deque(self, interval):
+        if interval == 1:
+            return self.data_1s
+        elif interval == 60:
+            return self.data_1min
+        elif interval == 600:
+            return self.data_10min
+        elif interval == 3600:
+            return self.data_1hour
+        return None
+    
+    def get_last_time(self):
+        return self.time_1s[-1]
+    
+    def get_last_data(self):
+        return [x[-1] for x in self.data_1s]
 
 class TotalPlotter:
     def __init__(self, master):
