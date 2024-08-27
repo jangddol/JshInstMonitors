@@ -86,6 +86,22 @@ class VariousTimeDeque:
     def get_last_data(self):
         return [x[-1] for x in self.data_1s]
 
+    def set_test_data(self):
+        for _ in range(MAXLEN):
+            for i in range(self.numdata):
+                self.data_1s[i].append(0.5)
+                self.data_1min[i].append(0.5)
+                self.data_10min[i].append(0.5)
+                self.data_1hour[i].append(0.5)
+        
+        end_time = time.time()
+        for i in range(MAXLEN):
+            self.time_1s.append(datetime.fromtimestamp(end_time - MAXLEN + i))
+            self.time_1min.append(datetime.fromtimestamp(end_time - MAXLEN * 60 + 60 *i))
+            self.time_10min.append(datetime.fromtimestamp(end_time - MAXLEN * 600 + 600 * i))
+            self.time_1hour.append(datetime.fromtimestamp(end_time - MAXLEN * 3600 + 3600 * i))
+
+
 class TotalPlotter:
     def __init__(self, master):
         self.master = master
