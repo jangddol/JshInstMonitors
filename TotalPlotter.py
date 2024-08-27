@@ -386,7 +386,7 @@ class TotalPlotter:
         self.shield_data_label.config(text=f": {self.rfm_deque.get_last_data()[1]:.2f} L/min")
         self.bypass_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
         self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
-        self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
+        self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[1]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == 200 else self.make_error_sentence(self.rfm_status_code)}")
         self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == 200 else self.make_error_sentence(self.drc91c_status_code)}")
