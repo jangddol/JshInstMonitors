@@ -122,47 +122,19 @@ class TotalPlotter:
         self.create_widgets()
 
         # Deques for storing values
-        self.time_rfm_1s: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1s: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1s: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1s:list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_1s.append(datetime.fromtimestamp(time.time()))
-        for i in range(3):
-            self.data_rfm_1s[i].append(0)
-        self.time_drc91c_1s.append(datetime.fromtimestamp(time.time()))
-        for i in range(2):
-            self.data_drc91c_1s[i].append(0)
-        
-        self.time_rfm_1min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_10min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_10min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_10min: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_10min: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
-        
-        self.time_rfm_1hour: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_rfm_1hour: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(3)]
-        self.time_drc91c_1hour: deque[datetime] = deque(maxlen=MAXLEN)
-        self.data_drc91c_1hour: list[deque[float]] = [deque(maxlen=MAXLEN) for _ in range(2)]
+        self.rfm_deque = VariousTimeDeque(3)
+        self.drc91c_deque = VariousTimeDeque(2)
 
-        self.time_rfm_plot = self.time_rfm_1s
-        self.data_rfm_plot = self.data_rfm_1s
-        self.time_drc91c_plot = self.time_drc91c_1s
-        self.data_drc91c_plot = self.data_drc91c_1s
+        self.time_rfm_plot = self.rfm_deque.get_time_deque(1)
+        self.data_rfm_plot = self.rfm_deque.get_data_deque(1)
+        self.time_drc91c_plot = self.drc91c_deque.get_time_deque(1)
+        self.data_drc91c_plot = self.drc91c_deque.get_data_deque(1)
 
-        # Start the data fetching thread
-        self.last_1min_time = time.time()
-        self.last_10min_time = time.time()
-        self.last_1hour_time = time.time()
-        
         self.rfm_status_code = "Off"
         self.drc91c_status_code = "Off"
         
-        self.set_test_data()
+        self.rfm_deque.set_test_data()
+        self.drc91c_deque.set_test_data()
         
         self.update_interval(None)
         self.main_loop()
@@ -239,99 +211,83 @@ class TotalPlotter:
     
     def on_resize(self, event):
         # Get the new width of the window
+        self.last_width = self.width
         self.width = event.width
+        if self.last_width != self.width:
+            self.resize_figure()
+
+    def resize_figure(self):
+        # Adjust font size based on the new width
+        new_font_size = max(8, self.width // 75)  # Adjust the divisor as needed
+        
+        plt.rcParams.update({
+            'font.size': new_font_size,
+            'axes.labelsize': new_font_size,
+            'axes.titlesize': new_font_size,
+            'xtick.labelsize': new_font_size * 0.8,
+            'ytick.labelsize': new_font_size * 0.8,
+            'legend.fontsize': new_font_size * 0.9,
+        })
+
+        self.figure.tight_layout(pad=1.0)
 
     def update_interval(self, event):
         interval = self.get_interval()
-        if interval == 1:
-            self.time_rfm_plot = self.time_rfm_1s
-            self.data_rfm_plot = self.data_rfm_1s
-            self.time_drc91c_plot = self.time_drc91c_1s
-            self.data_drc91c_plot = self.data_drc91c_1s
-        elif interval == 60:
-            self.time_rfm_plot = self.time_rfm_1min
-            self.data_rfm_plot = self.data_rfm_1min
-            self.time_drc91c_plot = self.time_drc91c_1min
-            self.data_drc91c_plot = self.data_drc91c_1min
-        elif interval == 600:
-            self.time_rfm_plot = self.time_rfm_10min
-            self.data_rfm_plot = self.data_rfm_10min
-            self.time_drc91c_plot = self.time_drc91c_10min
-            self.data_drc91c_plot = self.data_drc91c_10min
-        elif interval == 3600:
-            self.time_rfm_plot = self.time_rfm_1hour
-            self.data_rfm_plot = self.data_rfm_1hour
-            self.time_drc91c_plot = self.time_drc91c_1hour
-            self.data_drc91c_plot = self.data_drc91c_1hour
+        self.time_rfm_plot = self.rfm_deque.get_time_deque(interval)
+        self.data_rfm_plot = self.rfm_deque.get_data_deque(interval)
+        self.time_drc91c_plot = self.drc91c_deque.get_time_deque(interval)
+        self.data_drc91c_plot = self.drc91c_deque.get_data_deque(interval)
         
         if len(self.time_rfm_plot) <= 2:
             return
         self.update_plot()
     
-    def fetch_loop(self):
-        self.fetch_data()
-        self.update_data()
-        self.master.after(1000, self.fetch_loop)
-    
     def main_loop(self):
+        loop_start_time = time.time()
+        
         self.update_display()
-        if time.time() - self.time_drc91c_1s[-1].timestamp() < 0.1:
+        
+        if loop_start_time - self.rfm_deque.get_last_time().timestamp() < 0.2:
             if self.get_interval() == 1:
                 self.update_plot()
         
-        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_1min[-1].timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < 1:
             if self.get_interval() == 60:
                 self.update_plot()
         
-        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_10min[-1].timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < 1:
             if self.get_interval() == 600:
                 self.update_plot()
         
-        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_1hour[-1].timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < 1:
             if self.get_interval() == 3600:
                 self.update_plot()
         
-        self.master.after(100, self.main_loop)
+        loop_end_time = time.time()
+        execution_time = loop_end_time - loop_start_time
+        
+        print("main loop time : ", execution_time)
+        
+        # Calculate the time to wait before the next execution
+        next_execution_delay = max(0, int((0.2 - execution_time) * 1000))
+        
+        self.master.after(next_execution_delay, self.main_loop)
+
+    def fetch_loop(self):
+        while True:
+            loop_start_time = time.time()
+            
+            self.fetch_data()
+            
+            elapsed_time = time.time() - loop_start_time
+            sleep_time = max(0, 1 - elapsed_time)
+            
+            time.sleep(sleep_time)
 
     def start(self):
         self.data_fetch_thread = threading.Thread(target=self.fetch_loop)
+        self.data_fetch_thread.daemon = True
         self.data_fetch_thread.start()
-
-    def update_data(self):
-        last_1s_data_time = self.time_rfm_1s[-1].timestamp()
-        last_1min_data_time = self.time_rfm_1min[-1].timestamp()
-        last_10min_data_time = self.time_rfm_10min[-1].timestamp()
-        last_1hour_data_time = self.time_rfm_1hour[-1].timestamp()
-        if last_1s_data_time - last_1min_data_time > 60:
-            self.update_1min_data()
-        if last_1s_data_time - last_10min_data_time > 600:
-            self.update_10min_data()
-        if last_1s_data_time - last_1hour_data_time > 3600:
-            self.update_1hour_data()
-
-    def update_1min_data(self):
-        self.time_rfm_1min.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_1min[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_1min.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_1min[i].append(self.data_drc91c_1s[i][-1])
-    
-    def update_10min_data(self):
-        self.time_rfm_10min.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_10min[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_10min.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_10min[i].append(self.data_drc91c_1s[i][-1])
-    
-    def update_1hour_data(self):
-        self.time_rfm_1hour.append(self.time_rfm_1s[-1])
-        for i in range(3):
-            self.data_rfm_1hour[i].append(self.data_rfm_1s[i][-1])
-        self.time_drc91c_1hour.append(self.time_drc91c_1s[-1])
-        for i in range(2):
-            self.data_drc91c_1hour[i].append(self.data_drc91c_1s[i][-1])
 
     def parse_temperature(self, value: str) -> float:
         return float(value[1:7])
@@ -398,18 +354,14 @@ class TotalPlotter:
         except Exception as e:
             self.drc91c_status_code = 'Critical'
             print(f"Critical error fetching from RFM: {e}")
-        return [0, 0, 0]
+        return [0, 0]
 
     def fetch_data(self):
         values_rfm = self.get_data_from_rfm()
-        for i in range(3):
-            self.data_rfm_1s[i].append(values_rfm[i])
-        self.time_rfm_1s.append(datetime.fromtimestamp(time.time()))
+        self.rfm_deque.update_data(values_rfm, time.time())
 
         values_drc91c = self.get_data_from_drc91c()
-        for i in range(2):
-            self.data_drc91c_1s[i].append(values_drc91c[i])
-        self.time_drc91c_1s.append(datetime.fromtimestamp(time.time()))
+        self.drc91c_deque.update_data(values_drc91c, time.time())
 
     def get_interval(self):
         interval_str = self.interval_combo.get()
@@ -431,11 +383,11 @@ class TotalPlotter:
             return f": {error_code}"
 
     def update_display(self):
-        self.tip_data_label.config(text=f": {self.data_rfm_1s[0][-1]:.2f} L/min")
-        self.shield_data_label.config(text=f": {self.data_rfm_1s[1][-1]:.2f} L/min")
-        self.vent_data_label.config(text=f": {self.data_rfm_1s[2][-1]:.2f} L/min")
-        self.head_data_label.config(text=f": {self.data_drc91c_1s[0][-1]:.2f} K")
-        self.cold_tip_data_label.config(text=f": {self.data_drc91c_1s[1][-1]:.2f} K")
+        self.tip_data_label.config(text=f": {self.rfm_deque.get_last_data()[0]:.2f} L/min")
+        self.shield_data_label.config(text=f": {self.rfm_deque.get_last_data()[1]:.2f} L/min")
+        self.vent_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
+        self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
+        self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == 200 else self.make_error_sentence(self.rfm_status_code)}")
         self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == 200 else self.make_error_sentence(self.drc91c_status_code)}")
@@ -491,26 +443,12 @@ class TotalPlotter:
             label.set_horizontalalignment('right')  # 오른쪽 정렬
         
         self.update_xformatter(self.get_interval())
-        self.resize_figure()
+        self.set_axes_margin()
         self.canvas.draw()
 
-    def resize_figure(self):
-        # Adjust font size based on the new width
-        new_font_size = max(8, self.width // 75)  # Adjust the divisor as needed
-        
-        plt.rcParams.update({
-            'font.size': new_font_size,
-            'axes.labelsize': new_font_size,
-            'axes.titlesize': new_font_size,
-            'xtick.labelsize': new_font_size * 0.8,
-            'ytick.labelsize': new_font_size * 0.8,
-            'legend.fontsize': new_font_size * 0.9,
-        })
-
-        # Adjust padding
-        self.ax.margins(x=0.1, y=0.5)  # Adjust margins as needed
-        self.ax2.margins(x=0.1, y=0.5)  # Adjust margins as needed
-        self.figure.tight_layout(pad=1.0)  # Adjust padding as needed
+    def set_axes_margin(self):
+        self.ax.margins(x=0.1, y=0.5)
+        self.ax2.margins(x=0.1, y=0.5)
 
     def update_xformatter(self, interval):
         def format_date(x, pos=None):
@@ -529,43 +467,6 @@ class TotalPlotter:
         self.ax.xaxis.set_major_formatter(formatter)
         
         self.figure.autofmt_xdate()
-
-    def set_test_data(self):
-        start_time = time.time() - MAXLEN * 3600
-        for i in range(MAXLEN):
-            self.data_rfm_1s[0].append(0.5)
-            self.data_rfm_1s[1].append(0.3)
-            self.data_rfm_1s[2].append(0.7)
-            self.data_drc91c_1s[0].append(300)
-            self.data_drc91c_1s[1].append(400)
-            self.data_rfm_1min[0].append(0.5)
-            self.data_rfm_1min[1].append(0.3)
-            self.data_rfm_1min[2].append(0.7)
-            self.data_drc91c_1min[0].append(300)
-            self.data_drc91c_1min[1].append(400)
-            self.data_rfm_10min[0].append(0.5)
-            self.data_rfm_10min[1].append(0.3)
-            self.data_rfm_10min[2].append(0.7)
-            self.data_drc91c_10min[0].append(300)
-            self.data_drc91c_10min[1].append(400)
-            self.data_rfm_1hour[0].append(0.5)
-            self.data_rfm_1hour[1].append(0.3)
-            self.data_rfm_1hour[2].append(0.7)
-            self.data_drc91c_1hour[0].append(300)
-            self.data_drc91c_1hour[1].append(400)
-            
-        for i in range(MAXLEN * 3600):
-            self.time_rfm_1s.append(datetime.fromtimestamp(start_time + i))
-            self.time_drc91c_1s.append(datetime.fromtimestamp(start_time + i))
-            if i % 60 == 0:
-                self.time_rfm_1min.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_1min.append(datetime.fromtimestamp(start_time + i))
-            if i % 600 == 0:
-                self.time_rfm_10min.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_10min.append(datetime.fromtimestamp(start_time + i))
-            if i % 3600 == 0:
-                self.time_rfm_1hour.append(datetime.fromtimestamp(start_time + i))
-                self.time_drc91c_1hour.append(datetime.fromtimestamp(start_time + i))
 
 if __name__ == "__main__":
     root = tk.Tk()
