@@ -363,9 +363,9 @@ class TotalPlotter:
     def make_error_sentence(self, error_code):
         try:
             error_code = int(error_code)
-            return f"Err({error_code})"
+            return f": Err({error_code})"
         except ValueError:
-            return error_code
+            return f": {error_code}"
 
     def update_display(self):
         self.tip_data_label.config(text=f": {self.data_rfm_1s[0][-1]:.2f} L/min")
