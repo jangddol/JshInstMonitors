@@ -1,4 +1,7 @@
+import json
 import tkinter as tk
+from tkinter import filedialog
+from tkinter import messagebox
 from channel import ChannelName
 import enum
 
@@ -176,8 +179,19 @@ class SchedularWindow:
         self.schedule_widgets = []
         self.schedule_count = 0
 
-        self.add_schedule_button = tk.Button(self.root, text="스케줄 추가", command=self.add_schedule)
-        self.add_schedule_button.pack(pady=10)
+        # 버튼 프레임 생성
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(fill=tk.X, pady=10)
+
+        # 버튼들을 가로로 배열
+        self.add_schedule_button = tk.Button(button_frame, text="스케줄 추가", command=self.add_schedule)
+        self.add_schedule_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_button = tk.Button(button_frame, text="스케줄 저장", command=self.save_schedules)
+        self.save_button.pack(side=tk.LEFT, padx=5)
+
+        self.load_button = tk.Button(button_frame, text="스케줄 불러오기", command=self.load_schedules)
+        self.load_button.pack(side=tk.LEFT, padx=5)
 
         self.schedule_frame = tk.Frame(self.root)
         self.schedule_frame.pack(fill=tk.BOTH, expand=True)
@@ -207,6 +221,72 @@ class SchedularWindow:
             schedule_widget.index = i
             schedule_widget.recreate_frame()
             schedule_widget.frame.pack(fill=tk.X)
+
+    def save_schedules(self):
+        schedules_data = []
+        for widget in self.schedule_widgets:
+            schedule_data = {
+                "day": widget.day.value,
+                "hour": widget.hour,
+                "minute": widget.minute,
+                "channel": widget.channelname.value,
+                "action": widget.action.value,
+                "number": widget.number_var.get()
+            }
+            schedules_data.append(schedule_data)
+        
+        file_path = filedialog.asksaveasfilename(defaultextension=".json",
+                                                 filetypes=[("JSON files", "*.json")])
+        if not file_path:  # 사용자가 취소를 누른 경우
+            return
+
+        with open(file_path, "w") as f:
+            json.dump(schedules_data, f)
+        
+        messagebox.showinfo("저장 완료", f"스케줄이 성공적으로 저장되었습니다.\n파일: {file_path}")
+
+    def load_schedules(self):
+        file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
+        if not file_path:  # 사용자가 취소를 누른 경우
+            return
+        
+        try:
+            with open(file_path, "r") as f:
+                schedules_data = json.load(f)
+            
+            # 임시 리스트에 새 위젯 저장
+            temp_widgets = []
+            temp_count = 0
+
+            # 불러온 데이터로 새 스케줄 위젯 생성
+            for data in schedules_data:
+                widget = ScheduleWidget(self, temp_count)
+                widget.day_var.set(data["day"])
+                widget.hour_var.set(data["hour"])
+                widget.minute_var.set(data["minute"])
+                widget.channel_var.set(data["channel"])
+                widget.action_var.set(data["action"])
+                widget.number_var.set(data["number"])
+                widget.update_number_entry()
+                
+                temp_widgets.append(widget)
+                temp_count += 1
+
+            # 모든 위젯이 성공적으로 생성되면 기존 위젯 제거 및 새 위젯으로 교체
+            for widget in self.schedule_widgets:
+                widget.frame.destroy()
+            self.schedule_widgets = temp_widgets
+            self.schedule_count = temp_count
+
+            self.update_schedule_display()
+            messagebox.showinfo("불러오기 완료", f"스케줄이 성공적으로 불러와졌습니다.\n파일: {file_path}")
+        
+        except json.JSONDecodeError:
+            messagebox.showerror("오류", "잘못된 JSON 파일 형식입니다. 파일을 확인해주세요.")
+        except KeyError as e:
+            messagebox.showerror("오류", f"필수 키가 누락되었습니다: {str(e)}")
+        except Exception as e:
+            messagebox.showerror("오류", f"파일을 불러오는 중 오류가 발생했습니다: {str(e)}")
 
     def on_close(self):
         self.root.withdraw()
