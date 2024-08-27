@@ -160,8 +160,8 @@ class TotalPlotter:
         self.last_10min_time = time.time()
         self.last_1hour_time = time.time()
         
-        self.rfm_status_code = None
-        self.drc91c_status_code = None
+        self.rfm_status_code = "Off"
+        self.drc91c_status_code = "Off"
         
         self.set_test_data()
         
