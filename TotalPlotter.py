@@ -247,19 +247,20 @@ class TotalPlotter:
         
         self.update_display()
         
-        if loop_start_time - self.rfm_deque.get_last_time().timestamp() < 0.2:
+        expected_exc_delay = 0.2
+        if loop_start_time - self.rfm_deque.get_last_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 1:
                 self.update_plot()
         
-        if loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 60:
                 self.update_plot()
         
-        if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
         
-        if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < 1:
+        if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
                 self.update_plot()
         
@@ -267,7 +268,7 @@ class TotalPlotter:
         execution_time = loop_end_time - loop_start_time
         
         # Calculate the time to wait before the next execution
-        next_execution_delay = max(0, int((0.2 - execution_time) * 1000))
+        next_execution_delay = max(0, int((expected_exc_delay - execution_time) * 1000))
         
         self.master.after(next_execution_delay, self.main_loop)
 
