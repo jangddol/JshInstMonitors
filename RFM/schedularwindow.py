@@ -79,11 +79,13 @@ class ScheduleWidget:
         tk.OptionMenu(self.frame, self.day_var, Wday.Mon.value, Wday.Tue.value, Wday.Wed.value, Wday.Thu.value, Wday.Fri.value, Wday.Sat.value, Wday.Sun.value).grid(row=1, column=1)
 
         tk.Label(self.frame, text="시간:").grid(row=1, column=2)
-        self.hour_spinbox = tk.Spinbox(self.frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f")
+        self.hour_spinbox = tk.Spinbox(self.frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f", validate="key")
+        self.hour_spinbox['validatecommand'] = (self.frame.register(self.validate_hour), '%P')
         self.hour_spinbox.grid(row=1, column=3)
 
         tk.Label(self.frame, text="분:").grid(row=1, column=4)
-        self.minute_spinbox = tk.Spinbox(self.frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f")
+        self.minute_spinbox = tk.Spinbox(self.frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f", validate="key")
+        self.minute_spinbox['validatecommand'] = (self.frame.register(self.validate_minute), '%P')
         self.minute_spinbox.grid(row=1, column=5)
 
         tk.Label(self.frame, text="채널:").grid(row=1, column=6)
@@ -104,6 +106,24 @@ class ScheduleWidget:
         tk.Button(self.frame, text="삭제", command=self.delete_schedule).grid(row=1, column=14)  # 삭제 버튼 추가
 
         self.frame.pack(fill=tk.X)
+
+    def validate_hour(self, new_value):
+        if new_value == "":
+            return True
+        try:
+            int_value = int(new_value)
+            return 0 <= int_value <= 23 and not new_value.startswith('0')
+        except ValueError:
+            return False
+
+    def validate_minute(self, new_value):
+        if new_value == "":
+            return True
+        try:
+            int_value = int(new_value)
+            return 0 <= int_value <= 59 and not new_value.startswith('0')
+        except ValueError:
+            return False
 
     def validate_integer(self, new_value):
         if new_value == "":
