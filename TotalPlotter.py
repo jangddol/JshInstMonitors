@@ -155,7 +155,6 @@ class TotalPlotter:
         self.data_drc91c_plot = self.data_drc91c_1s
 
         # Start the data fetching thread
-        self.last_fetch_time = time.time()
         self.last_1min_time = time.time()
         self.last_10min_time = time.time()
         self.last_1hour_time = time.time()
@@ -275,28 +274,24 @@ class TotalPlotter:
         self.master.after(1000, self.fetch_loop)
     
     def main_loop(self):
-        if time.time() - self.last_fetch_time > 1:
-            self.last_fetch_time = time.time()
-            self.update_display()
+        self.update_display()
+        if time.time() - self.time_drc91c_1s[-1].timestamp() < 0.1:
             if self.get_interval() == 1:
                 self.update_plot()
-        if time.time() - self.last_1min_time > 60:
-            self.last_1min_time = time.time()
-            # self.update_1min_data()
+        
+        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_1min[-1].timestamp() < 1:
             if self.get_interval() == 60:
                 self.update_plot()
-        if time.time() - self.last_10min_time > 600:
-            self.last_10min_time = time.time()
-            # self.update_10min_data()
+        
+        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_10min[-1].timestamp() < 1:
             if self.get_interval() == 600:
                 self.update_plot()
-        if time.time() - self.last_1hour_time > 3600:
-            self.last_1hour_time = time.time()
-            # self.update_1hour_data()
+        
+        if self.time_drc91c_1s[-1].timestamp() - self.time_drc91c_1hour[-1].timestamp() < 1:
             if self.get_interval() == 3600:
                 self.update_plot()
-        # Call this method again after 1 second
-        self.master.after(1000, self.main_loop)
+        
+        self.master.after(100, self.main_loop)
 
     def start(self):
         self.data_fetch_thread = threading.Thread(target=self.fetch_loop)
