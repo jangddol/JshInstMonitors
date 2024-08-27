@@ -216,6 +216,7 @@ class TotalPlotter:
     
     def fetch_loop(self):
         self.fetch_data()
+        self.update_data()
         self.master.after(1000, self.fetch_loop)
     
     def main_loop(self):
@@ -226,17 +227,17 @@ class TotalPlotter:
                 self.update_plot()
         if time.time() - self.last_1min_time > 60:
             self.last_1min_time = time.time()
-            self.update_1min_data()
+            # self.update_1min_data()
             if self.get_interval() == 60:
                 self.update_plot()
         if time.time() - self.last_10min_time > 600:
             self.last_10min_time = time.time()
-            self.update_10min_data()
+            # self.update_10min_data()
             if self.get_interval() == 600:
                 self.update_plot()
         if time.time() - self.last_1hour_time > 3600:
             self.last_1hour_time = time.time()
-            self.update_1hour_data()
+            # self.update_1hour_data()
             if self.get_interval() == 3600:
                 self.update_plot()
         # Call this method again after 1 second
@@ -245,6 +246,18 @@ class TotalPlotter:
     def start(self):
         self.data_fetch_thread = threading.Thread(target=self.fetch_loop)
         self.data_fetch_thread.start()
+
+    def update_data(self):
+        last_1s_data_time = self.time_rfm_1s[-1].timestamp()
+        last_1min_data_time = self.time_rfm_1min[-1].timestamp()
+        last_10min_data_time = self.time_rfm_10min[-1].timestamp()
+        last_1hour_data_time = self.time_rfm_1hour[-1].timestamp()
+        if last_1s_data_time - last_1min_data_time > 60:
+            self.update_1min_data()
+        if last_1s_data_time - last_10min_data_time > 600:
+            self.update_10min_data()
+        if last_1s_data_time - last_1hour_data_time > 3600:
+            self.update_1hour_data()
 
     def update_1min_data(self):
         self.time_rfm_1min.append(self.time_rfm_1s[-1])
