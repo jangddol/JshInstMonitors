@@ -266,8 +266,6 @@ class TotalPlotter:
         loop_end_time = time.time()
         execution_time = loop_end_time - loop_start_time
         
-        print("main loop time : ", execution_time)
-        
         # Calculate the time to wait before the next execution
         next_execution_delay = max(0, int((0.2 - execution_time) * 1000))
         
