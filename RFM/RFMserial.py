@@ -158,10 +158,8 @@ class RFMserial_Real:
             line = self.ser.read_until(expected=lf).decode('ascii').strip()
         try:
             float_value = float(line)
-            print(f"Received float: {float_value}")
-        except ValueError:
-            print(f"Received non-float data")
-
+        except Exception:
+            line = "00000.00"
         return line
 
 class RFMserial_Sim:
