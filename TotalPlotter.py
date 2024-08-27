@@ -83,6 +83,15 @@ class VariousTimeDeque:
     def get_last_time(self):
         return self.time_1s[-1]
     
+    def get_last_1min_time(self):
+        return self.time_1min[-1]
+    
+    def get_last_10min_time(self):
+        return self.time_10min[-1]
+    
+    def get_last_1hour_time(self):
+        return self.time_1hour[-1]
+    
     def get_last_data(self):
         return [x[-1] for x in self.data_1s]
 
