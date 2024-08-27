@@ -133,8 +133,8 @@ class TotalPlotter:
         self.rfm_status_code = "Off"
         self.drc91c_status_code = "Off"
         
-        self.rfm_deque.set_test_data()
-        self.drc91c_deque.set_test_data()
+        # self.rfm_deque.set_test_data()
+        # self.drc91c_deque.set_test_data()
         
         self.update_interval(None)
         self.main_loop()
