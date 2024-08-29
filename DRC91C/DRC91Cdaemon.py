@@ -1,6 +1,9 @@
 import time
 import pyvisa
 import enum
+import json 
+import atexit
+from flask import Flask, jsonify
 
 
 class Sensor(enum.Enum):
@@ -15,14 +18,16 @@ class Sensor(enum.Enum):
 
 
 class DRC91C:
-    def __init__(self):
+    def __init__(self, device_address: str):
         self.rm = pyvisa.ResourceManager()
-        self.device = self.rm.open_resource('GPIB1::15::INSTR')
+        try:
+            self.device = self.rm.open_resource(device_address)
+        except pyvisa.VisaIOError as e:
+            print(f"Error opening device: {e}")
+            self.device = None
         self.control_sensor = self.get_current_control_sensor()
         self.set_proper_display_sensor()
-
-    def __del__(self):
-        self.close()
+        atexit.register(self.close)
 
     def close(self):
         self.device.close()
@@ -72,10 +77,35 @@ class DRC91C:
             return result[9:17], result[:8]
 
 
+def open_config_file(file_path: str):
+    # json file has two keys: 'device_address' and 'port'
+    # 'device_address' is the address of the GPIB address of the DRC91C·
+    # 'port' is the port number of the server. It should be an integer in range of 0 to 65535.
+    
+    with open(file_path, 'r') as file: # open json from file_path
+        config_data = json.load(file)
+        device_address = config_data.get('device_address')
+        port = config_data.get('port')
+        
+        if not isinstance(device_address, str) or not isinstance(port, int): # parsing json, check error from casting
+            raise ValueError("Invalid configuration data")
+        
+        return device_address, port
+
+
 if __name__ == '__main__':
-    from flask import Flask, jsonify
+    config_file_path = 'drc91c_config.json'
+    # If loading fails, create a default config.json.
+    try:
+        device_address, port = open_config_file(config_file_path)
+    except Exception as e:
+        print(e)
+        with open(config_file_path, 'w') as file:
+            json.dump({'device_address': 'GPIB1::15::INSTR', 'port': 5001}, file)
+        device_address, port = open_config_file(config_file_path)
+
     app = Flask(__name__)
-    drc91c = DRC91C()
+    drc91c = DRC91C(device_address)
 
     @app.route('/sensor_pair')
     def get_sensor_value_pair():
@@ -83,4 +113,4 @@ if __name__ == '__main__':
         print(valueA, valueB)
         return jsonify({'valueA': valueA, 'valueB': valueB})
 
-    app.run(host='0.0.0.0', port=5001)
+    app.run(host='0.0.0.0', port=port)
