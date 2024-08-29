@@ -519,10 +519,6 @@ class RFMApp:
 
 
 def open_config_file(file_path: str):
-    # json file has two keys: 'device_address' and 'port'
-    # 'device_address' is the address of the GPIB address of the DRC91C·
-    # 'port' is the port number of the server. It should be an integer in range of 0 to 65535.
-    
     with open(file_path, 'r') as file: # open json from file_path
         config_data = json.load(file)
         arduino_port = config_data.get('arduino_port')
