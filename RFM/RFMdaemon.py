@@ -1,3 +1,4 @@
+import json
 import tkinter as tk  # Or your chosen GUI framework
 import numpy as np
 from collections import deque
@@ -55,12 +56,12 @@ TOGGLE_STATE_SELECT_CHANNEL = "SelectChannel"
 MAXLEN = 100
 
 class RFMApp:
-    def __init__(self, master):
+    def __init__(self, master, port):
         self.master = master
         self.setup_initial_state()
         self.setup_ui()
         self.setup_data_collection()
-        self.setup_serial(SERIAL_ON)
+        self.setup_serial(SERIAL_ON, port)
         self.main_loop()
 
     def initialize_arrays(self):
@@ -135,8 +136,8 @@ class RFMApp:
         self.last_schedule_handle_time_in_min = self.get_time_in_min()
         self.schedular_window = None
 
-    def setup_serial(self, on):
-        self.serial = RFMserial(on, "COM3", 9600)
+    def setup_serial(self, on, port):
+        self.serial = RFMserial(on, port, 9600)
 
     def get_time_in_min(self):
         localtime = time.localtime()
@@ -516,9 +517,35 @@ class RFMApp:
             self.channelBkgColors[2] = COLOR_BLACK
             self.channelsEntry[2] = ""
 
+
+def open_config_file(file_path: str):
+    # json file has two keys: 'device_address' and 'port'
+    # 'device_address' is the address of the GPIB address of the DRC91C·
+    # 'port' is the port number of the server. It should be an integer in range of 0 to 65535.
+    
+    with open(file_path, 'r') as file: # open json from file_path
+        config_data = json.load(file)
+        arduino_port = config_data.get('arduino_port')
+        localserver_port = config_data.get('localserver_port')
+        
+        if not isinstance(arduino_port, str) or not isinstance(localserver_port, int): # parsing json, check error from casting
+            raise ValueError("Invalid configuration data")
+        
+        return arduino_port, localserver_port
+
 if __name__ == "__main__":
     import threading
     from flask import Flask, jsonify
+    
+    config_file_path = "rfm_config.json"
+    # If loading fails, create a default config.json.
+    try:
+        arduino_port, localserver_port = open_config_file(config_file_path)
+    except Exception as e:
+        print(e)
+        with open(config_file_path, 'w') as file:
+            json.dump({'arduino_port': 'COM3', 'localserver_port': 5000}, file)
+        arduino_port, localserver_port = open_config_file(config_file_path)
     
     # Flask 애플리케이션 설정
     app = Flask(__name__)
@@ -527,21 +554,21 @@ if __name__ == "__main__":
     def get_value():
         return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2]})
 
-    def run_app():
+    def run_app(port):
         # GUI 애플리케이션 실행
         master = tk.Tk()
         master.iconbitmap("MFC.ico")
         global rfmapp
-        rfmapp = RFMApp(master)
+        rfmapp = RFMApp(master, port)
         rfmapp.master.mainloop()
 
     def run_flask():
         # Flask 서버 실행
-        app.run(host='0.0.0.0', port=5000, use_reloader=False)
+        app.run(host='0.0.0.0', port=localserver_port, use_reloader=False)
 
     # 서브 스레드에서 Flask 서버 실행
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
 
-    run_app()
+    run_app(arduino_port)
