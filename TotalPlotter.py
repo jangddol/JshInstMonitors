@@ -1,3 +1,4 @@
+import json
 import tkinter as tk
 from tkinter import ttk
 import matplotlib.pyplot as plt
@@ -112,11 +113,14 @@ class VariousTimeDeque:
 
 
 class TotalPlotter:
-    def __init__(self, master):
+    def __init__(self, master, _rfm_localserver_port, _drc91c_localserver_port):
         self.master = master
         self.master.title("Total Plotter")
         self.master.bind("<Configure>", self.on_resize)
         self.width = 800  # Default width
+        
+        self.rfm_localserver_port = _rfm_localserver_port
+        self.drc91c_localserver_port = _drc91c_localserver_port
         
         # Create UI components
         self.create_widgets()
@@ -132,9 +136,6 @@ class TotalPlotter:
 
         self.rfm_status_code = "Off"
         self.drc91c_status_code = "Off"
-        
-        # self.rfm_deque.set_test_data()
-        # self.drc91c_deque.set_test_data()
         
         self.update_interval(None)
         self.main_loop()
@@ -297,7 +298,7 @@ class TotalPlotter:
             self.rfm_status_code = 'Off'
             return [0, 0, 0]
         try:
-            response = requests.get("http://127.0.0.1:5000/get_value", timeout=1)
+            response = requests.get(f"http://127.0.0.1:{self.rfm_localserver_port}/get_value", timeout=1)
             self.rfm_status_code = response.status_code
             if response.status_code == 200:
                 json = response.json()
@@ -329,7 +330,7 @@ class TotalPlotter:
             self.drc91c_status_code = 'Off'
             return [0, 0]
         try:
-            response = requests.get("http://127.0.0.1:5001/sensor_pair", timeout=1)
+            response = requests.get(f"http://127.0.0.1:{self.drc91c_localserver_port}/sensor_pair", timeout=1)
             self.drc91c_status_code = response.status_code
             if response.status_code == 200:
                 json = response.json()
@@ -467,9 +468,31 @@ class TotalPlotter:
         
         self.figure.autofmt_xdate()
 
+
+def open_config_file(file_path: str):
+    with open(file_path, 'r') as file: # open json from file_path
+        config_data = json.load(file)
+        
+        _rfm_localserver_port = config_data.get('rfm_localserver_port')
+        _drc91c_localserver_port = config_data.get('drc91c_localserver_port')
+        
+        if not isinstance(_rfm_localserver_port, int) or not isinstance(_drc91c_localserver_port, int): # parsing json, check error from casting
+            raise ValueError("Invalid configuration data")
+        
+        return _rfm_localserver_port, _drc91c_localserver_port
+
 if __name__ == "__main__":
+    config_file_path = 'totalplotter_config.json'
+    try:
+        rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
+    except Exception as e:
+        print(e)
+        with open(config_file_path, 'w') as file:
+            json.dump({'rfm_localserver_port': 5000, 'drc91c_localserver_port': 5001}, file)
+        rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
+    
     root = tk.Tk()
     root.iconbitmap("TotalPlotter.ico")
-    app = TotalPlotter(root)
+    app = TotalPlotter(root, rfm_localserver_port, drc91c_localserver_port)
     app.start()
     root.mainloop()
