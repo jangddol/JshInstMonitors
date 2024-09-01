@@ -112,7 +112,7 @@ class VariousTimeDeque:
             self.time_1hour.append(datetime.fromtimestamp(end_time - MAXLEN * 3600 + 3600 * i))
 
 
-class TotalPlotter:
+class FlowTempPlotter:
     def __init__(self, master, _rfm_localserver_port, _drc91c_localserver_port):
         self.master = master
         self.master.title("Total Plotter")
@@ -482,7 +482,7 @@ def open_config_file(file_path: str):
         return _rfm_localserver_port, _drc91c_localserver_port
 
 if __name__ == "__main__":
-    config_file_path = 'totalplotter_config.json'
+    config_file_path = 'flowtempplotter_config.json'
     try:
         rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
     except Exception as e:
@@ -492,7 +492,7 @@ if __name__ == "__main__":
         rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
     
     root = tk.Tk()
-    root.iconbitmap("TotalPlotter.ico")
-    app = TotalPlotter(root, rfm_localserver_port, drc91c_localserver_port)
+    root.iconbitmap("FlowTempPlotter.ico")
+    app = FlowTempPlotter(root, rfm_localserver_port, drc91c_localserver_port)
     app.start()
     root.mainloop()
