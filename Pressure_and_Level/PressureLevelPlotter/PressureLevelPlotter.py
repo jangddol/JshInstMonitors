@@ -1,123 +1,26 @@
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import smtplib
 import tkinter as tk
 from tkinter import ttk
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import requests
 import time
-from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 import matplotlib.dates as mdates
 import threading
 import matplotlib.ticker as ticker
+from scipy.signal import find_peaks
 
 from CustomDateLocator import CustomDateLocator
+from VariousTimeDeque import VariousTimeDeque
+from CustomMail import send_mail
 
 MAXLEN = 100
 
-class VariousTimeDeque:
-    def __init__(self, numdata):
-        self.numdata = numdata
-        self.time_1s = deque(maxlen=MAXLEN)
-        self.data_1s = [deque(maxlen=MAXLEN) for _ in range(numdata)]
-        self.time_1min = deque(maxlen=MAXLEN)
-        self.data_1min = [deque(maxlen=MAXLEN) for _ in range(numdata)]
-        self.time_10min = deque(maxlen=MAXLEN)
-        self.data_10min = [deque(maxlen=MAXLEN) for _ in range(numdata)]
-        self.time_1hour = deque(maxlen=MAXLEN)
-        self.data_1hour = [deque(maxlen=MAXLEN) for _ in range(numdata)]
-        
-        self.update_data([0] * numdata, time.time())
-        
-    def update_data(self, data, time):
-        if len(data) != self.numdata:
-            raise ValueError("Data length mismatch")
-        
-        if isinstance(time, datetime):
-            _time = time
-        elif isinstance(time, float):
-            _time = datetime.fromtimestamp(time)
-        else:
-            raise ValueError("Invalid time type")
 
-        self.time_1s.append(_time)
-        for i in range(self.numdata):
-            self.data_1s[i].append(data[i])
-        
-        if len(self.time_1min) == 0 or _time - self.time_1min[-1] >= timedelta(minutes=1):
-            self.time_1min.append(_time)
-            for i in range(self.numdata):
-                self.data_1min[i].append(data[i])
-        
-        if len(self.time_10min) == 0 or _time - self.time_10min[-1] >= timedelta(minutes=10):
-            self.time_10min.append(_time)
-            for i in range(self.numdata):
-                self.data_10min[i].append(data[i])
-        
-        if len(self.time_1hour) == 0 or _time - self.time_1hour[-1] >= timedelta(hours=1):
-            self.time_1hour.append(_time)
-            for i in range(self.numdata):
-                self.data_1hour[i].append(data[i])
-
-    def get_time_deque(self, interval):
-        if interval == 1:
-            return self.time_1s
-        elif interval == 60:
-            return self.time_1min
-        elif interval == 600:
-            return self.time_10min
-        elif interval == 3600:
-            return self.time_1hour
-        return None
-    
-    def get_data_deque(self, interval):
-        if interval == 1:
-            return self.data_1s
-        elif interval == 60:
-            return self.data_1min
-        elif interval == 600:
-            return self.data_10min
-        elif interval == 3600:
-            return self.data_1hour
-        return None
-    
-    def get_last_time(self):
-        return self.time_1s[-1]
-    
-    def get_last_1min_time(self):
-        return self.time_1min[-1]
-    
-    def get_last_10min_time(self):
-        return self.time_10min[-1]
-    
-    def get_last_1hour_time(self):
-        return self.time_1hour[-1]
-    
-    def get_last_data(self):
-        return [x[-1] for x in self.data_1s]
-
-    def set_test_data(self):
-        for _ in range(MAXLEN):
-            for i in range(self.numdata):
-                self.data_1s[i].append(0.5)
-                self.data_1min[i].append(0.5)
-                self.data_10min[i].append(0.5)
-                self.data_1hour[i].append(0.5)
-        
-        end_time = time.time()
-        for i in range(MAXLEN):
-            self.time_1s.append(datetime.fromtimestamp(end_time - MAXLEN + i))
-            self.time_1min.append(datetime.fromtimestamp(end_time - MAXLEN * 60 + 60 *i))
-            self.time_10min.append(datetime.fromtimestamp(end_time - MAXLEN * 600 + 600 * i))
-            self.time_1hour.append(datetime.fromtimestamp(end_time - MAXLEN * 3600 + 3600 * i))
-
-
-class TotalPlotter:
+class PressureLevelPlotter:
     def __init__(self, master):
         self.master = master
-        self.master.title("Total Plotter")
+        self.master.title("Pressure & Level Plotter")
         self.master.bind("<Configure>", self.on_resize)
         self.width = 800  # Default width
         
@@ -126,11 +29,15 @@ class TotalPlotter:
 
         # Deques for storing values
         self.plant_deque = VariousTimeDeque(2)
+        self.storage_deque = VariousTimeDeque(1)
 
         self.time_plant_plot = self.plant_deque.get_time_deque(1)
         self.data_plant_plot = self.plant_deque.get_data_deque(1)
+        self.time_storage_plot = self.storage_deque.get_time_deque(1)
+        self.data_storage_plot = self.storage_deque.get_data_deque(1)
 
         self.plant_status_code = "Off"
+        self.storage_status_code = "Off"
         
         self.update_interval(None)
         self.main_loop()
@@ -142,9 +49,13 @@ class TotalPlotter:
 
         # IntVar를 사용하여 체크박스 상태를 저장
         self.enable_plant = tk.IntVar()
+        self.enable_storage = tk.IntVar()
 
         self.checkbox_plant = tk.Checkbutton(self.top_frame, text="Enable Plant", variable=self.enable_plant, command=self.update_plot)
         self.checkbox_plant.pack(side=tk.LEFT)
+
+        self.checkbox_storage = tk.Checkbutton(self.top_frame, text="Enable Storage", variable=self.enable_storage, command=self.update_plot)
+        self.checkbox_storage.pack(side=tk.LEFT)
 
         self.interval_label = tk.Label(self.top_frame, text="Interval:")
         self.interval_label.pack(side=tk.LEFT)
@@ -173,8 +84,9 @@ class TotalPlotter:
         self.data_frame = tk.Frame(self.right_frame)
         self.data_frame.pack(side=tk.TOP, fill=tk.Y)
 
-        self.volume_label = self.create_value_labels("• Volume", "L", self.data_frame, 0)
-        self.pressure_label = self.create_value_labels("• Pressure", "psi", self.data_frame, 1)
+        self.plant_volume_label = self.create_value_labels("• V_plant", "L", self.data_frame, 0)
+        self.plant_pressure_label = self.create_value_labels("• P_plant", "psi", self.data_frame, 1)
+        self.storage_pressure_label = self.create_value_labels("• P_storage", "psi", self.data_frame, 2)
 
         # Status frame
         self.status_frame = tk.Frame(self.right_frame)
@@ -182,6 +94,7 @@ class TotalPlotter:
 
         self.current_time_label = self.create_value_labels("Current Time", "", self.status_frame, 0)
         self.plant_status_label = self.create_value_labels("Plant stat", "", self.status_frame, 1)
+        self.storage_status_label = self.create_value_labels("Storage stat", "", self.status_frame, 2)
 
         # Configure grid weights to maintain aspect ratio
         self.bottom_frame.grid_columnconfigure(0, weight=1)  # Canvas takes remaining space
@@ -223,6 +136,8 @@ class TotalPlotter:
         interval = self.get_interval()
         self.time_plant_plot = self.plant_deque.get_time_deque(interval)
         self.data_plant_plot = self.plant_deque.get_data_deque(interval)
+        self.time_storage_plot = self.storage_deque.get_time_deque(interval)
+        self.data_storage_plot = self.storage_deque.get_data_deque(interval)
         
         if len(self.time_plant_plot) <= 2:
             return
@@ -246,7 +161,11 @@ class TotalPlotter:
             if self.get_interval() == 600:
                 self.update_plot()
             if self.plant_deque.get_last_data()[0] == 0:
-                self.send_mail()
+                now = datetime.now()
+                date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                subject = f"{date_str} Plant is disconnected."
+                contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
+                send_mail(subject, contents)
         
         if loop_start_time - self.plant_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
@@ -308,9 +227,43 @@ class TotalPlotter:
             print(f"Critical error fetching from Plant: {e}")
         return [0, 0]
 
+    def get_data_from_storage(self):
+        # Fetch data from Storage local server daemon
+        if self.enable_storage.get() == 0:
+            self.storage_status_code = 'Off'
+            return [0]
+        try:
+            response = requests.get("http://127.0.0.1:5003/Meas", timeout=1)
+            self.storage_status_code = response.status_code
+            if response.status_code == 200:
+                json = response.json()
+                list_of_str = [json['StoragePressure']]
+                return [float(x.split(' ')[0]) for x in list_of_str]
+            else:
+                print(f"Error fetching from Storage: {response.status_code}")
+                return [0]
+        except requests.exceptions.ConnectionError as e:
+            self.storage_status_code = 'ConnectionError'
+            print(f"Connection error fetching from Storage: {e}")
+        except requests.exceptions.Timeout as e:
+            self.storage_status_code = 'Timeout'
+            print(f"Timeout error fetching from Storage: {e}")
+        except requests.exceptions.HTTPError as e:
+            self.storage_status_code = 'HTTPError'
+            print(f"HTTP error fetching from Storage: {e}")
+        except requests.exceptions.RequestException as e:
+            self.storage_status_code = 'RequestException'
+            print(f"General error fetching from Storage: {e}")
+        except Exception as e:
+            self.storage_status_code = 'Critical'
+            print(f"Critical error fetching from Storage: {e}")
+        return [0]
+
     def fetch_data(self):
         values_plant = self.get_data_from_plant()
+        values_storage = self.get_data_from_storage()
         self.plant_deque.update_data(values_plant, time.time())
+        self.storage_deque.update_data(values_storage, time.time())
 
     def get_interval(self):
         interval_str = self.interval_combo.get()
@@ -332,10 +285,12 @@ class TotalPlotter:
             return f": {error_code}"
 
     def update_display(self):
-        self.volume_label.config(text=f": {self.plant_deque.get_last_data()[0]:.2f} L")
-        self.pressure_label.config(text=f": {self.plant_deque.get_last_data()[1]:.2f} psi")
+        self.plant_volume_label.config(text=f": {self.plant_deque.get_last_data()[0]:.2f} L")
+        self.plant_pressure_label.config(text=f": {self.plant_deque.get_last_data()[1]:.2f} psi")
+        self.storage_pressure_label.config(text=f": {self.storage_deque.get_last_data()[0]:.2f} psi")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.plant_status_label.config(text=f"{': Connected' if self.plant_status_code == 200 else self.make_error_sentence(self.plant_status_code)}")
+        self.storage_status_label.config(text=f"{': Connected' if self.storage_status_code == 200 else self.make_error_sentence(self.storage_status_code)}")
     
     def update_plot(self):
         if len(self.time_plant_plot) <= 2:
@@ -346,9 +301,10 @@ class TotalPlotter:
         
         marker_size = 3
         
-        self.ax.plot(self.time_plant_plot, self.data_plant_plot[0], marker='o', color='green', label="Volume", markersize=marker_size)
+        self.ax.plot(self.time_plant_plot, self.data_plant_plot[0], marker='o', color='blue', label="Volume", markersize=marker_size)
         
-        self.ax2.plot(self.time_plant_plot, self.data_plant_plot[1], marker='o', color='red', label="Pressure", markersize=marker_size)
+        self.ax2.plot(self.time_plant_plot, self.data_plant_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
+        self.ax2.plot(self.time_storage_plot, self.data_storage_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
         
         ax2_color = 'red'
         
@@ -372,6 +328,34 @@ class TotalPlotter:
     
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
+
+
+
+        # Find local maxima and minima
+        peaks, _ = find_peaks(self.data_plant_plot[0])
+        valleys, _ = find_peaks([-x for x in self.data_plant_plot[0]])  # Invert data to find minima
+
+        # Annotate local maxima
+        for peak in peaks:
+            self.ax.annotate(f'{self.data_plant_plot[0][peak]:.2f}', 
+                            (self.time_plant_plot[peak], self.data_plant_plot[0][peak]),
+                            textcoords="offset points", 
+                            xytext=(0,10), 
+                            ha='center', 
+                            color='blue', 
+                            alpha=0.8)
+
+        # Annotate local minima
+        for valley in valleys:
+            self.ax.annotate(f'{self.data_plant_plot[0][valley]:.2f}', 
+                            (self.time_plant_plot[valley], self.data_plant_plot[0][valley]),
+                            textcoords="offset points", 
+                            xytext=(0,-15), 
+                            ha='center', 
+                            color='blue', 
+                            alpha=0.8)
+
+
 
         self.ax.relim()
         self.ax.autoscale_view()
@@ -410,80 +394,10 @@ class TotalPlotter:
         
         self.figure.autofmt_xdate()
 
-    def send_mail(self):
-        try:
-            # 파일 읽기
-            with open('sender.txt', 'r') as f:
-                lines = f.readlines()
-
-            # 이메일 정보 설정
-            for line in lines:
-                if 'SMTP_SERVER' in line:
-                    SMTP_SERVER = line.split(',')[1].strip()
-                elif 'SMTP_PORT' in line:
-                    SMTP_PORT = int(line.split(',')[1].strip())  # 포트는 정수로 변환
-                elif 'SMTP_USER' in line:
-                    SMTP_USER = line.split(',')[1].strip()
-                elif 'SMTP_PASSWORD' in line:
-                    SMTP_PASSWORD = line.split(',')[1].strip()
-
-            print('SMTP_SERVER :', SMTP_SERVER)
-            print('SMTP_PORT :', SMTP_PORT)
-            print('SMTP_USER :', SMTP_USER)
-            print('SMTP_PASSWORD :', SMTP_PASSWORD)
-
-            # 보내는 이 정보
-            SENDER = SMTP_USER
-
-            # 받는 이 주소
-            with open('recipent.txt', 'r') as f:
-                RECIPIENT = f.readlines()
-        except:
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open('log.txt', 'a') as file:
-                # 한 줄의 로그 작성
-                log_message = f'[{current_time}] 이메일 발신자/수신자 목록을 불러오는 데에 실패했습니다.\n'
-                file.write(log_message)
-
-        try:
-            # 이메일 제목  = 현재 날짜 정보
-            now = datetime.now()
-            date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-            SUBJECT = f"{date_str} Plant is disconnected."
-
-            # 이메일 내용
-            contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
-
-            # 이메일 생성
-            msg = MIMEMultipart()
-            msg['Subject'] = SUBJECT
-            msg['From'] = SENDER
-            msg['To'] = ','.join(RECIPIENT)
-            msg.attach(MIMEText(contents))
-        except:
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open('log.txt', 'a') as file:
-                # 한 줄의 로그 작성
-                log_message = f'[{current_time}] 이메일 객체를 생성하는 데에 실패했습니다.\n'
-                file.write(log_message)
-
-        try:
-            # SMTP 서버 연결 및 이메일 전송
-            smtp_server = smtplib.SMTP_SSL(host=SMTP_SERVER, port=SMTP_PORT)
-            smtp_server.login(SMTP_USER, SMTP_PASSWORD)
-            for reciever in RECIPIENT:
-                smtp_server.sendmail(SENDER, reciever, msg.as_string())
-            smtp_server.quit()
-        except:
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open('log.txt', 'a') as file:
-                # 한 줄의 로그 작성
-                log_message = f'[{current_time}] 이메일을 보내는 도중 오류가 발생했습니다.\n'
-                file.write(log_message)
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap("PlantPlotter.ico")
-    app = TotalPlotter(root)
+    root.iconbitmap("PressureLevelPlotter.ico")
+    app = PressureLevelPlotter(root)
     app.start()
     root.mainloop()
