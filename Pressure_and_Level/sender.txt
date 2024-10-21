@@ -1,0 +1,4 @@
+SMTP_SERVER,smtp.worksmobile.com
+SMTP_PORT,465
+SMTP_USER,j991005@korea.ac.kr
+SMTP_PASSWORD,AeHix2v350bP
