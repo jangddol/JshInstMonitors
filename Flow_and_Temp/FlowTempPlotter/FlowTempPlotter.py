@@ -1,14 +1,15 @@
+from datetime import datetime
 import json
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+import os
+import requests
+import threading
+import time
 import tkinter as tk
 from tkinter import ttk
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import requests
-import time
-from datetime import datetime
-import matplotlib.dates as mdates
-import threading
-import matplotlib.ticker as ticker
 
 from CustomDateLocator import CustomDateLocator
 from VariousTimeDeque import VariousTimeDeque
@@ -374,8 +375,26 @@ class FlowTempPlotter:
         self.figure.autofmt_xdate()
 
     def save_log(self, time, rfm_data, drc91c_data):
-        with open("log.txt", "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S:% ')}, {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
+        # 로그 폴더 경로 설정
+        log_dir = "log"
+        
+        # 현재 날짜에 맞는 폴더 경로 설정
+        year = time.strftime('%Y')
+        month = time.strftime('%m')
+        day = time.strftime('%d')
+        
+        # 연도/월 폴더 경로
+        year_month_dir = os.path.join(log_dir, year, month)
+        
+        # 폴더가 없으면 생성
+        os.makedirs(year_month_dir, exist_ok=True)
+        
+        # 날짜에 해당하는 로그 파일 경로
+        log_file_path = os.path.join(year_month_dir, f"{day}.txt")
+        
+        # 로그 파일에 데이터 추가
+        with open(log_file_path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
 
 def open_config_file(file_path: str):
     with open(file_path, 'r') as file: # open json from file_path
