@@ -376,7 +376,7 @@ class FlowTempPlotter:
 
     def save_log(self, time, rfm_data, drc91c_data):
         # 로그 폴더 경로 설정
-        log_dir = "log"
+        log_dir = "log_flowtemp"
         
         # 현재 날짜에 맞는 폴더 경로 설정
         year = time.strftime('%Y')
