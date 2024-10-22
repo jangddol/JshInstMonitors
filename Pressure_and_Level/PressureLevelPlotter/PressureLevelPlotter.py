@@ -1,18 +1,21 @@
-import tkinter as tk
-from tkinter import ttk
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import requests
-import time
 from datetime import datetime
 import matplotlib.dates as mdates
-import threading
+import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import os
+import requests
 from scipy.signal import find_peaks
+import threading
+import time
+import tkinter as tk
+from tkinter import ttk
 
 from CustomDateLocator import CustomDateLocator
 from VariousTimeDeque import VariousTimeDeque
 from CustomMail import send_mail
+
+import numpy as np
 
 MAXLEN = 100
 
@@ -50,12 +53,16 @@ class PressureLevelPlotter:
         # IntVar를 사용하여 체크박스 상태를 저장
         self.enable_plant = tk.IntVar()
         self.enable_storage = tk.IntVar()
+        self.enable_localmaxmin = tk.IntVar()
 
         self.checkbox_plant = tk.Checkbutton(self.top_frame, text="Enable Plant", variable=self.enable_plant, command=self.update_plot)
         self.checkbox_plant.pack(side=tk.LEFT)
 
         self.checkbox_storage = tk.Checkbutton(self.top_frame, text="Enable Storage", variable=self.enable_storage, command=self.update_plot)
         self.checkbox_storage.pack(side=tk.LEFT)
+        
+        self.checkbox_localmaxmin = tk.Checkbutton(self.top_frame, text="Local Max/Min", variable=self.enable_localmaxmin, command=self.update_plot)
+        self.checkbox_localmaxmin.pack(side=tk.LEFT)
 
         self.interval_label = tk.Label(self.top_frame, text="Interval:")
         self.interval_label.pack(side=tk.LEFT)
@@ -156,6 +163,7 @@ class PressureLevelPlotter:
         if loop_start_time - self.plant_deque.get_last_1min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 60:
                 self.update_plot()
+            self.save_log(self.plant_deque.get_last_1min_time(), self.plant_deque.get_last_data(), self.storage_deque.get_last_data())
         
         if loop_start_time - self.plant_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
@@ -260,8 +268,10 @@ class PressureLevelPlotter:
         return [0]
 
     def fetch_data(self):
-        values_plant = self.get_data_from_plant()
-        values_storage = self.get_data_from_storage()
+        # values_plant = self.get_data_from_plant()
+        # values_storage = self.get_data_from_storage()
+        values_plant = [30*np.sin(time.time()/10) + 30, 3 * np.cos(time.time()/10) + 3 + 0.1*np.cos(time.time()*10)]
+        values_storage = [4 * np.sin(time.time()/10 + 1) + 3 + 0.1*np.cos(time.time()*10)]
         self.plant_deque.update_data(values_plant, time.time())
         self.storage_deque.update_data(values_storage, time.time())
 
@@ -329,33 +339,9 @@ class PressureLevelPlotter:
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
-
-
-        # Find local maxima and minima
-        peaks, _ = find_peaks(self.data_plant_plot[0])
-        valleys, _ = find_peaks([-x for x in self.data_plant_plot[0]])  # Invert data to find minima
-
-        # Annotate local maxima
-        for peak in peaks:
-            self.ax.annotate(f'{self.data_plant_plot[0][peak]:.2f}', 
-                            (self.time_plant_plot[peak], self.data_plant_plot[0][peak]),
-                            textcoords="offset points", 
-                            xytext=(0,10), 
-                            ha='center', 
-                            color='blue', 
-                            alpha=0.8)
-
-        # Annotate local minima
-        for valley in valleys:
-            self.ax.annotate(f'{self.data_plant_plot[0][valley]:.2f}', 
-                            (self.time_plant_plot[valley], self.data_plant_plot[0][valley]),
-                            textcoords="offset points", 
-                            xytext=(0,-15), 
-                            ha='center', 
-                            color='blue', 
-                            alpha=0.8)
-
-
+        if self.enable_localmaxmin.get() == 1:
+            max_pressure = 12
+            self.draw_local_maxmin(self.ax2, max_pressure)
 
         self.ax.relim()
         self.ax.autoscale_view()
@@ -371,6 +357,63 @@ class PressureLevelPlotter:
         self.update_xformatter(self.get_interval())
         self.set_axes_margin()
         self.canvas.draw()
+
+    def draw_local_maxmin(self, ax, max_pressure):
+        # Find local maxima and minima for plant pressure
+        peaks, _ = find_peaks(self.data_plant_plot[1])
+        valleys, _ = find_peaks([-x for x in self.data_plant_plot[1]])  # Invert data to find minima
+
+        for peak in peaks: # Annotate local maxima
+            ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
+                            (self.time_plant_plot[peak], self.data_plant_plot[1][peak]),
+                            textcoords="offset points",
+                            xytext=(0,-10), ha='left', color='green', alpha=0.8, fontweight='bold')
+            # vertical line
+            ax.plot([self.time_plant_plot[peak], self.time_plant_plot[peak]], [0, max_pressure], 'g--', alpha=0.5)
+            ax.annotate(f'{self.time_plant_plot[peak].strftime("%H:%M:%S")}',
+                            (self.time_plant_plot[peak], 0),
+                            textcoords="offset points",
+                            xytext=(0,-15), ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
+
+        for valley in valleys: # Annotate local minima
+            ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
+                            (self.time_plant_plot[valley], self.data_plant_plot[1][valley]),
+                            textcoords="offset points",
+                            xytext=(0,10), ha='left', color='green', alpha=0.8, fontweight='bold')
+            # vertical line
+            ax.plot([self.time_plant_plot[valley], self.time_plant_plot[valley]], [0, max_pressure], 'g--', alpha=0.5)
+            ax.annotate(f'{self.time_plant_plot[valley].strftime("%H:%M:%S")}',
+                            (self.time_plant_plot[valley], 0),
+                            textcoords="offset points",
+                            xytext=(0,-15), ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
+        
+        # Find local maxima and minima for storage pressure
+        peaks, _ = find_peaks(self.data_storage_plot[0])
+        valleys, _ = find_peaks([-x for x in self.data_storage_plot[0]])
+        
+        for peak in peaks:
+            ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
+                            (self.time_storage_plot[peak], self.data_storage_plot[0][peak]),
+                            textcoords="offset points",
+                            xytext=(0,-10), ha='left', color='red', alpha=0.8, fontweight='bold')
+            # vertical line
+            ax.plot([self.time_storage_plot[peak], self.time_storage_plot[peak]], [0, max_pressure], 'r--', alpha=0.5)
+            ax.annotate(f'{self.time_storage_plot[peak].strftime("%H:%M:%S")}',
+                            (self.time_storage_plot[peak], 0),
+                            textcoords="offset points",
+                            xytext=(0,-15), ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
+            
+        for valley in valleys:
+            ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
+                            (self.time_storage_plot[valley], self.data_storage_plot[0][valley]),
+                            textcoords="offset points",
+                            xytext=(0,10), ha='left', color='red', alpha=0.8, fontweight='bold')
+            # vertical line
+            ax.plot([self.time_storage_plot[valley], self.time_storage_plot[valley]], [0, max_pressure], 'r--', alpha=0.5)
+            ax.annotate(f'{self.time_storage_plot[valley].strftime("%H:%M:%S")}',
+                            (self.time_storage_plot[valley], 0),
+                            textcoords="offset points",
+                            xytext=(0,-15), ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
 
     def set_axes_margin(self):
         self.ax.margins(x=0.1, y=0.5)
@@ -393,6 +436,28 @@ class PressureLevelPlotter:
         self.ax.xaxis.set_major_formatter(formatter)
         
         self.figure.autofmt_xdate()
+
+    def save_log(self, time, plant_data, storage_data):
+        # 로그 폴더 경로 설정
+        log_dir = "log_pressurelevel"
+        
+        # 현재 날짜에 맞는 폴더 경로 설정
+        year = time.strftime('%Y')
+        month = time.strftime('%m')
+        day = time.strftime('%d')
+        
+        # 연도/월 폴더 경로
+        year_month_dir = os.path.join(log_dir, year, month)
+        
+        # 폴더가 없으면 생성
+        os.makedirs(year_month_dir, exist_ok=True)
+        
+        # 날짜에 해당하는 로그 파일 경로
+        log_file_path = os.path.join(year_month_dir, f"{day}.txt")
+        
+        # 로그 파일에 데이터 추가
+        with open(log_file_path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {plant_data[0]:.2f} V, {plant_data[1]:.2f} psi, {storage_data[0]:.2f} psi\n")
 
 
 if __name__ == "__main__":
