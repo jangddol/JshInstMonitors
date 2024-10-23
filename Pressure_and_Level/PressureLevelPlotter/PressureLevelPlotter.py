@@ -346,8 +346,8 @@ class PressureLevelPlotter:
         self.ax.relim()
         self.ax.autoscale_view()
         
-        self.ax.legend(loc='lower left')  # RFM Plot의 legend를 오른쪽 위로 이동
-        self.ax2.legend(loc='lower right')  # DRC91C Plot의 legend를 오른쪽 중앙으로 이동
+        self.ax.legend(loc='lower left') 
+        self.ax2.legend(loc='lower right')
         
         # x축 눈금 글자 대각선으로 회전
         for label in self.ax.get_xticklabels():
