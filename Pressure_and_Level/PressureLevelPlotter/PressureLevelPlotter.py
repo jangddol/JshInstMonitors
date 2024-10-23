@@ -326,12 +326,6 @@ class PressureLevelPlotter:
         self.ax2.yaxis.set_label_position("right")  # y축 레이블을 오른쪽으로 이동
         self.ax2.yaxis.tick_right()  # y축 눈금을 오른쪽으로 이동
     
-        # y축 최소값을 0으로 설정
-        if self.ax.get_ylim()[0] < 0:
-            self.ax.set_ylim(bottom=0)  # RFM Plot의 y축 최소값을 0으로 설정
-        if self.ax2.get_ylim()[0] < 0:
-            self.ax2.set_ylim(bottom=0)  # DRC91C Plot의 y축 최소값을 0으로 설정 (필요한 경우)
-    
         # 그리드 추가
         self.ax.grid(True)  # RFM Plot에 그리드 추가
         self.ax2.grid(color=ax2_color)  # DRC91C Plot에 그리드 추가
@@ -339,11 +333,13 @@ class PressureLevelPlotter:
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
+        max_pressure = max(10, max(self.data_plant_plot[1]), max(self.data_storage_plot[0]))
         if self.enable_localmaxmin.get() == 1:
-            max_pressure = 12
             self.draw_local_maxmin(self.ax2, max_pressure)
 
-        self.ax.relim()
+        self.ax.set_ylim(0, max(100, max(self.data_plant_plot[0])))
+        self.ax2.set_ylim(0, max_pressure)
+            
         self.ax.autoscale_view()
         
         self.ax.legend(loc='lower left') 
