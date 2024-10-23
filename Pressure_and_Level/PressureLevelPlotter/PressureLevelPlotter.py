@@ -366,27 +366,25 @@ class PressureLevelPlotter:
 
         for peak in peaks: # Annotate local maxima
             ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
-                            (self.time_plant_plot[peak], self.data_plant_plot[1][peak]),
-                            textcoords="offset points",
-                            xytext=(0,-10), ha='left', color='green', alpha=0.8, fontweight='bold')
+                            (self.time_plant_plot[peak], min(self.data_plant_plot[1][peak], max_pressure) - 1),
+                            textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
             # vertical line
             ax.plot([self.time_plant_plot[peak], self.time_plant_plot[peak]], [0, max_pressure], 'g--', alpha=0.5)
             ax.annotate(f'{self.time_plant_plot[peak].strftime("%H:%M:%S")}',
                             (self.time_plant_plot[peak], 0),
-                            textcoords="offset points",
-                            xytext=(0,-15), ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
+                            textcoords="data", xytext=(self.time_plant_plot[peak], -1),
+                            ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
 
         for valley in valleys: # Annotate local minima
             ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
-                            (self.time_plant_plot[valley], self.data_plant_plot[1][valley]),
-                            textcoords="offset points",
-                            xytext=(0,10), ha='left', color='green', alpha=0.8, fontweight='bold')
+                            (self.time_plant_plot[valley], max(self.data_plant_plot[1][valley], 0) + 1),
+                            textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
             # vertical line
             ax.plot([self.time_plant_plot[valley], self.time_plant_plot[valley]], [0, max_pressure], 'g--', alpha=0.5)
             ax.annotate(f'{self.time_plant_plot[valley].strftime("%H:%M:%S")}',
                             (self.time_plant_plot[valley], 0),
-                            textcoords="offset points",
-                            xytext=(0,-15), ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
+                            textcoords="data", xytext=(self.time_plant_plot[valley], -1),
+                            ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
         
         # Find local maxima and minima for storage pressure
         peaks = self.find_peaks(self.data_storage_plot[0])
@@ -394,27 +392,25 @@ class PressureLevelPlotter:
         
         for peak in peaks:
             ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
-                            (self.time_storage_plot[peak], self.data_storage_plot[0][peak]),
-                            textcoords="offset points",
-                            xytext=(0,-10), ha='left', color='red', alpha=0.8, fontweight='bold')
+                            (self.time_storage_plot[peak], min(self.data_storage_plot[0][peak], max_pressure) - 1),
+                            textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
             # vertical line
             ax.plot([self.time_storage_plot[peak], self.time_storage_plot[peak]], [0, max_pressure], 'r--', alpha=0.5)
             ax.annotate(f'{self.time_storage_plot[peak].strftime("%H:%M:%S")}',
                             (self.time_storage_plot[peak], 0),
-                            textcoords="offset points",
-                            xytext=(0,-15), ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
+                            textcoords="data", xytext=(self.time_storage_plot[peak], -1),
+                            ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
             
         for valley in valleys:
             ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
-                            (self.time_storage_plot[valley], self.data_storage_plot[0][valley]),
-                            textcoords="offset points",
-                            xytext=(0,10), ha='left', color='red', alpha=0.8, fontweight='bold')
+                            (self.time_storage_plot[valley], max(self.data_storage_plot[0][valley], 0) + 1),
+                            textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
             # vertical line
             ax.plot([self.time_storage_plot[valley], self.time_storage_plot[valley]], [0, max_pressure], 'r--', alpha=0.5)
             ax.annotate(f'{self.time_storage_plot[valley].strftime("%H:%M:%S")}',
                             (self.time_storage_plot[valley], 0),
-                            textcoords="offset points",
-                            xytext=(0,-15), ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
+                            textcoords="data", xytext=(self.time_storage_plot[valley], -1),
+                            ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
 
     def set_axes_margin(self):
         self.ax.margins(x=0.1, y=0.5)
