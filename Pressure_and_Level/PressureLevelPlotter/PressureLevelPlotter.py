@@ -360,8 +360,7 @@ class PressureLevelPlotter:
 
     def find_peaks(self, data):
         data_smooth = [sum(list(data)[int(max(i-2, 0)):int(min(i+3, len(data)))]) / (min(i+3, len(data)) - max(i-2, 0)) for i in range(len(data))]
-        peaks = [i for i in range(2, len(data_smooth)-2)
-                 if data_smooth[i] >= data_smooth[i-1] and data_smooth[i] >= data_smooth[i+1] and data_smooth[i] >= data_smooth[i-2] and data_smooth[i] >= data_smooth[i+2]]
+        peaks = [i for i in range(2, len(data_smooth)-2) if data_smooth[i] == max(data_smooth[i-2:i+3])]
         return peaks
 
     def draw_local_maxmin(self, ax, max_pressure):
