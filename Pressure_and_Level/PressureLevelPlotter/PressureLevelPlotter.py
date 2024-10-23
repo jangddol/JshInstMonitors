@@ -327,8 +327,8 @@ class PressureLevelPlotter:
         self.ax2.yaxis.tick_right()  # y축 눈금을 오른쪽으로 이동
     
         # 그리드 추가
-        self.ax.grid(True)  # RFM Plot에 그리드 추가
-        self.ax2.grid(color=ax2_color)  # DRC91C Plot에 그리드 추가
+        self.ax.grid(True)
+        self.ax2.grid(color=ax2_color)
     
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
