@@ -5,7 +5,6 @@ import matplotlib.ticker as ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import os
 import requests
-from scipy.signal import find_peaks
 import threading
 import time
 import tkinter as tk
