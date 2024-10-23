@@ -358,10 +358,16 @@ class PressureLevelPlotter:
         self.set_axes_margin()
         self.canvas.draw()
 
+    def find_peaks(self, data):
+        data_smooth = [sum(list(data)[int(max(i-2, 0)):int(min(i+3, len(data)))]) / (min(i+3, len(data)) - max(i-2, 0)) for i in range(len(data))]
+        peaks = [i for i in range(2, len(data_smooth)-2)
+                 if data_smooth[i] >= data_smooth[i-1] and data_smooth[i] >= data_smooth[i+1] and data_smooth[i] >= data_smooth[i-2] and data_smooth[i] >= data_smooth[i+2]]
+        return peaks
+
     def draw_local_maxmin(self, ax, max_pressure):
         # Find local maxima and minima for plant pressure
-        peaks, _ = find_peaks(self.data_plant_plot[1])
-        valleys, _ = find_peaks([-x for x in self.data_plant_plot[1]])  # Invert data to find minima
+        peaks = self.find_peaks(self.data_plant_plot[1])
+        valleys = self.find_peaks([-x for x in self.data_plant_plot[1]])  # Invert data to find minima
 
         for peak in peaks: # Annotate local maxima
             ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
@@ -388,8 +394,8 @@ class PressureLevelPlotter:
                             xytext=(0,-15), ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
         
         # Find local maxima and minima for storage pressure
-        peaks, _ = find_peaks(self.data_storage_plot[0])
-        valleys, _ = find_peaks([-x for x in self.data_storage_plot[0]])
+        peaks = self.find_peaks(self.data_storage_plot[0])
+        valleys = self.find_peaks([-x for x in self.data_storage_plot[0]])
         
         for peak in peaks:
             ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
