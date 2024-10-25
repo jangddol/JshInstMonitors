@@ -173,6 +173,12 @@ class PressureLevelPlotter:
                 subject = f"{date_str} Plant is disconnected."
                 contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
                 send_mail(subject, contents)
+            if self.plant_deque.get_last_data()[1] > 3.0 or self.storage_deque.get_last_data()[0] > 9.0:
+                now = datetime.now()
+                date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                subject = f"{date_str} Pressure is too high."
+                contents = f"Plz check the Pressure. Pressure is too high at {date_str}."
+                send_mail(subject, contents)
         
         if loop_start_time - self.plant_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
