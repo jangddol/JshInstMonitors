@@ -324,12 +324,6 @@ class FlowTempPlotter:
         self.ax2.yaxis.set_label_position("right")  # y축 레이블을 오른쪽으로 이동
         self.ax2.yaxis.tick_right()  # y축 눈금을 오른쪽으로 이동
     
-        # y축 최소값을 0으로 설정
-        if self.ax.get_ylim()[0] < 0:
-            self.ax.set_ylim(bottom=0)  # RFM Plot의 y축 최소값을 0으로 설정
-        if self.ax2.get_ylim()[0] < 0:
-            self.ax2.set_ylim(bottom=0)  # DRC91C Plot의 y축 최소값을 0으로 설정 (필요한 경우)
-    
         # 그리드 추가
         self.ax.grid(True)  # RFM Plot에 그리드 추가
         self.ax2.grid(color=ax2_color)  # DRC91C Plot에 그리드 추가
@@ -338,6 +332,11 @@ class FlowTempPlotter:
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
         self.ax.relim()
+        # y축 최소값을 0으로 설정
+        if self.ax.get_ylim()[0] < 0:
+            self.ax.set_ylim(bottom=0)  # RFM Plot의 y축 최소값을 0으로 설정
+        if self.ax2.get_ylim()[0] < 0:
+            self.ax2.set_ylim(bottom=0)  # DRC91C Plot의 y축 최소값을 0으로 설정 (필요한 경우)
         self.ax.autoscale_view()
         
         self.ax.legend(loc='lower left')  # RFM Plot의 legend를 오른쪽 위로 이동
