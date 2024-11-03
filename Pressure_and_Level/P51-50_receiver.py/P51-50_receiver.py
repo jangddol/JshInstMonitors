@@ -2,6 +2,8 @@ import serial
 import numpy as np
 
 storage_pressure = None
+plant_pressure = None
+plant_volume = None
 
 def open_serials():
     Arduino = serial.Serial('COM4', 9600, timeout=1)
@@ -9,10 +11,32 @@ def open_serials():
     Arduino.flushOutput()
     return Arduino
 
-def cal_pressure(pressure_bit):
-    pressure_bit = float(pressure_bit)
-    pressure = 0.06104 * pressure_bit - 5.82056
-    return pressure
+def cal_pressure_storage(storage_pressure_bit):
+    storage_pressure_bit = float(storage_pressure_bit)
+    storage_pressure = 0.06104 * storage_pressure_bit - 5.82056
+    return storage_pressure
+
+def cal_pressure_plant(plant_pressure_bit):
+    plant_pressure_bit = float(plant_pressure_bit)
+    plant_pressure = 0.01929 * plant_pressure_bit - 3.54868
+    return plant_pressure
+
+def level_to_volume(x):
+    x2 = x * x
+    x3 = x2 * x
+    x4 = x3 * x
+    a0 = -7.70234
+    a1 = 2.6769
+    a2 = -0.00686
+    a3 = 0.00048930
+    a4 = -5.73005e-6
+    return a0 + a1 * x + a2 * x2 + a3 * x3 + a4 * x4
+
+def cal_volume_plant(plant_volume_bit):
+    plant_volume_bit = float(plant_volume_bit)
+    plant_volume_level = 0.06647 * plant_volume_bit
+    plant_volume = level_to_volume(plant_volume_level)
+    return plant_volume
 
 def serial_mediator():
     cutoff_second = 10
@@ -21,13 +45,23 @@ def serial_mediator():
     while True:
         try:
             if Arduino.in_waiting:
-                pressure_bit = Arduino.readline().decode().strip()
-                print(f"Pressure bit: {pressure_bit}")
+                P_st_bit, P_pl_bit, V_pl_bit = Arduino.readline().decode().strip().split(',')
+                print(f"P_st bit: {P_st_bit}, P_pl_bit: {P_pl_bit}, V_pl bit: {V_pl_bit}")
                 global storage_pressure
+                global plant_pressure
+                global plant_volume
                 if storage_pressure is None:
-                    storage_pressure = cal_pressure(pressure_bit)
+                    storage_pressure = cal_pressure_storage(P_st_bit)
                 else:
-                    storage_pressure = (1-BETA) * cal_pressure(pressure_bit) + BETA * storage_pressure
+                    storage_pressure = (1-BETA) * cal_pressure_storage(P_st_bit) + BETA * storage_pressure
+                if plant_pressure is None:
+                    plant_pressure = cal_pressure_plant(P_pl_bit)
+                else:
+                    plant_pressure = (1-BETA) * cal_pressure_plant(P_pl_bit) + BETA * plant_pressure
+                if plant_volume is None:
+                    plant_volume = cal_volume_plant(V_pl_bit)
+                else:
+                    plant_volume = (1-BETA) * cal_volume_plant(V_pl_bit) + BETA * plant_volume
         except Exception as e:
             print(f"Error : {e}")
             Arduino.close()
@@ -46,9 +80,12 @@ if __name__ == "__main__":
     @app.route('/Meas', methods=['GET'])
     def Meas():
         global storage_pressure
-        if storage_pressure is None:
-            return jsonify({'StoragePressure': 'None'})
-        return jsonify({'StoragePressure': f"{storage_pressure:.3f}"})
+        global plant_pressure
+        global plant_volume
+        P_st_string = 'None' if storage_pressure is None else f"{storage_pressure:.3f}"
+        P_pl_string = 'None' if plant_pressure is None else f"{plant_pressure:.3f}"
+        V_pl_string = 'None' if plant_volume is None else f"{plant_volume:.3f}"
+        return jsonify({'P_st': P_st_string, 'P_pl': P_pl_string, 'V_pl': V_pl_string})
 
     def run_flask():
         app.run(host='0.0.0.0', port=5003, use_reloader=False)
