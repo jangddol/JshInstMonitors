@@ -30,16 +30,12 @@ class PressureLevelPlotter:
         self.create_widgets()
 
         # Deques for storing values
-        self.plant_deque = VariousTimeDeque(2)
-        self.storage_deque = VariousTimeDeque(1)
+        self.arduino_deque = VariousTimeDeque(3) # 0: P_st, 1: P_pl, 2: V_pl
 
-        self.time_plant_plot = self.plant_deque.get_time_deque(1)
-        self.data_plant_plot = self.plant_deque.get_data_deque(1)
-        self.time_storage_plot = self.storage_deque.get_time_deque(1)
-        self.data_storage_plot = self.storage_deque.get_data_deque(1)
+        self.time_arduino_plot = self.arduino_deque.get_time_deque(1)
+        self.data_arduino_plot = self.arduino_deque.get_data_deque(1)
 
-        self.plant_status_code = "Off"
-        self.storage_status_code = "Off"
+        self.arduino_status_code = "Off"
         
         self.update_interval(None)
         self.main_loop()
@@ -50,16 +46,12 @@ class PressureLevelPlotter:
         self.top_frame.pack(side=tk.TOP, fill=tk.X)
 
         # IntVar를 사용하여 체크박스 상태를 저장
-        self.enable_plant = tk.IntVar()
-        self.enable_storage = tk.IntVar()
+        self.enable_arduino = tk.IntVar()
         self.enable_localmaxmin = tk.IntVar()
 
-        self.checkbox_plant = tk.Checkbutton(self.top_frame, text="Enable Plant", variable=self.enable_plant, command=self.update_plot)
-        self.checkbox_plant.pack(side=tk.LEFT)
+        self.checkbox_arduino = tk.Checkbutton(self.top_frame, text="Enable Arduino", variable=self.enable_arduino, command=self.update_plot)
+        self.checkbox_arduino.pack(side=tk.LEFT)
 
-        self.checkbox_storage = tk.Checkbutton(self.top_frame, text="Enable Storage", variable=self.enable_storage, command=self.update_plot)
-        self.checkbox_storage.pack(side=tk.LEFT)
-        
         self.checkbox_localmaxmin = tk.Checkbutton(self.top_frame, text="Local Max/Min", variable=self.enable_localmaxmin, command=self.update_plot)
         self.checkbox_localmaxmin.pack(side=tk.LEFT)
 
@@ -99,8 +91,7 @@ class PressureLevelPlotter:
         self.status_frame.pack(side=tk.BOTTOM, fill=tk.Y)
 
         self.current_time_label = self.create_value_labels("Current Time", "", self.status_frame, 0)
-        self.plant_status_label = self.create_value_labels("Plant stat", "", self.status_frame, 1)
-        self.storage_status_label = self.create_value_labels("Storage stat", "", self.status_frame, 2)
+        self.arduino_status_label = self.create_value_labels("Arduino stat", "", self.status_frame, 1)
 
         # Configure grid weights to maintain aspect ratio
         self.bottom_frame.grid_columnconfigure(0, weight=1)  # Canvas takes remaining space
@@ -140,12 +131,10 @@ class PressureLevelPlotter:
 
     def update_interval(self, event):
         interval = self.get_interval()
-        self.time_plant_plot = self.plant_deque.get_time_deque(interval)
-        self.data_plant_plot = self.plant_deque.get_data_deque(interval)
-        self.time_storage_plot = self.storage_deque.get_time_deque(interval)
-        self.data_storage_plot = self.storage_deque.get_data_deque(interval)
+        self.time_arduino_plot = self.arduino_deque.get_time_deque(interval)
+        self.data_arduino_plot = self.arduino_deque.get_data_deque(interval)
         
-        if len(self.time_plant_plot) <= 2:
+        if len(self.time_arduino_plot) <= 2:
             return
         self.update_plot()
     
@@ -155,32 +144,32 @@ class PressureLevelPlotter:
         self.update_display()
         
         expected_exc_delay = 0.2
-        if loop_start_time - self.plant_deque.get_last_time().timestamp() < expected_exc_delay:
+        if loop_start_time - self.arduino_deque.get_last_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 1:
                 self.update_plot()
         
-        if loop_start_time - self.plant_deque.get_last_1min_time().timestamp() < expected_exc_delay:
+        if loop_start_time - self.arduino_deque.get_last_1min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 60:
                 self.update_plot()
-            self.save_log(self.plant_deque.get_last_1min_time(), self.plant_deque.get_last_data(), self.storage_deque.get_last_data())
+            self.save_log(self.arduino_deque.get_last_1min_time(), self.arduino_deque.get_last_data())
         
-        if loop_start_time - self.plant_deque.get_last_10min_time().timestamp() < expected_exc_delay:
+        if loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
-            if self.plant_deque.get_last_data()[0] == 0:
+            if self.arduino_deque.get_last_data()[0] == [0, 0, 0]:
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                subject = f"{date_str} Plant is disconnected."
-                contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
+                subject = f"{date_str} Arduino is disconnected."
+                contents = f"Plz check the Arduino. Arduino is disconnected at {date_str}."
                 send_mail(subject, contents)
-            if self.plant_deque.get_last_data()[1] > 3.0 or self.storage_deque.get_last_data()[0] > 9.0:
+            if self.arduino_deque.get_last_data()[1] > 3.0 or self.arduino_deque.get_last_data()[0] > 9.0:
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Pressure is too high."
                 contents = f"Plz check the Pressure. Pressure is too high at {date_str}."
                 send_mail(subject, contents)
         
-        if loop_start_time - self.plant_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
+        if loop_start_time - self.arduino_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
                 self.update_plot()
         
@@ -208,77 +197,41 @@ class PressureLevelPlotter:
         self.data_fetch_thread.daemon = True
         self.data_fetch_thread.start()
 
-    def get_data_from_plant(self):
-        # Fetch data from Plant local server daemon
-        if self.enable_plant.get() == 0:
-            self.plant_status_code = 'Off'
-            return [0, 0]
-        try:
-            response = requests.get("http://127.0.0.1:5002/Meas", timeout=1)
-            self.plant_status_code = response.status_code
-            if response.status_code == 200:
-                json = response.json()
-                list_of_str = [json['Volume'], json['Pressure']]
-                return [float(x.split(' ')[0]) for x in list_of_str]
-            else:
-                print(f"Error fetching from Plant: {response.status_code}")
-                return [0, 0]
-        except requests.exceptions.ConnectionError as e:
-            self.plant_status_code = 'ConnectionError'
-            print(f"Connection error fetching from Plant: {e}")
-        except requests.exceptions.Timeout as e:
-            self.plant_status_code = 'Timeout'
-            print(f"Timeout error fetching from Plant: {e}")
-        except requests.exceptions.HTTPError as e:
-            self.plant_status_code = 'HTTPError'
-            print(f"HTTP error fetching from Plant: {e}")
-        except requests.exceptions.RequestException as e:
-            self.plant_status_code = 'RequestException'
-            print(f"General error fetching from Plant: {e}")
-        except Exception as e:
-            self.plant_status_code = 'Critical'
-            print(f"Critical error fetching from Plant: {e}")
-        return [0, 0]
-
-    def get_data_from_storage(self):
-        # Fetch data from Storage local server daemon
-        if self.enable_storage.get() == 0:
-            self.storage_status_code = 'Off'
-            return [0]
+    def get_data_from_arduino(self):
+        # Fetch data from Arduino local server daemon
+        if self.enable_arduino.get() == 0:
+            self.arduino_status_code = 'Off'
+            return [0, 0, 0]
         try:
             response = requests.get("http://127.0.0.1:5003/Meas", timeout=1)
-            self.storage_status_code = response.status_code
+            self.arduino_status_code = response.status_code
             if response.status_code == 200:
                 json = response.json()
-                list_of_str = [json['StoragePressure']]
+                list_of_str = [json['P_st'], json['P_pl'], json['V_pl']]
                 return [float(x.split(' ')[0]) for x in list_of_str]
             else:
                 print(f"Error fetching from Storage: {response.status_code}")
-                return [0]
+                return [0, 0, 0]
         except requests.exceptions.ConnectionError as e:
-            self.storage_status_code = 'ConnectionError'
+            self.arduino_status_code = 'ConnectionError'
             print(f"Connection error fetching from Storage: {e}")
         except requests.exceptions.Timeout as e:
-            self.storage_status_code = 'Timeout'
+            self.arduino_status_code = 'Timeout'
             print(f"Timeout error fetching from Storage: {e}")
         except requests.exceptions.HTTPError as e:
-            self.storage_status_code = 'HTTPError'
+            self.arduino_status_code = 'HTTPError'
             print(f"HTTP error fetching from Storage: {e}")
         except requests.exceptions.RequestException as e:
-            self.storage_status_code = 'RequestException'
+            self.arduino_status_code = 'RequestException'
             print(f"General error fetching from Storage: {e}")
         except Exception as e:
-            self.storage_status_code = 'Critical'
+            self.arduino_status_code = 'Critical'
             print(f"Critical error fetching from Storage: {e}")
-        return [0]
+        return [0, 0, 0]
 
     def fetch_data(self):
-        # values_plant = self.get_data_from_plant()
-        # values_storage = self.get_data_from_storage()
-        values_plant = [30*np.sin(time.time()/10) + 30, 3 * np.cos(time.time()/10) + 3 + 0.1*np.cos(time.time()*10)]
-        values_storage = [4 * np.sin(time.time()/10 + 1) + 3 + 0.1*np.cos(time.time()*10)]
-        self.plant_deque.update_data(values_plant, time.time())
-        self.storage_deque.update_data(values_storage, time.time())
+        values_arduino = self.get_data_from_arduino()
+        self.arduino_deque.update_data(values_arduino, time.time())
 
     def get_interval(self):
         interval_str = self.interval_combo.get()
@@ -300,15 +253,14 @@ class PressureLevelPlotter:
             return f": {error_code}"
 
     def update_display(self):
-        self.plant_volume_label.config(text=f": {self.plant_deque.get_last_data()[0]:.2f} L")
-        self.plant_pressure_label.config(text=f": {self.plant_deque.get_last_data()[1]:.2f} psi")
-        self.storage_pressure_label.config(text=f": {self.storage_deque.get_last_data()[0]:.2f} psi")
+        self.plant_volume_label.config(text=f": {self.arduino_deque.get_last_data()[2]:.2f} L")
+        self.plant_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[1]:.2f} psi")
+        self.storage_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[0]:.2f} psi")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
-        self.plant_status_label.config(text=f"{': Connected' if self.plant_status_code == 200 else self.make_error_sentence(self.plant_status_code)}")
-        self.storage_status_label.config(text=f"{': Connected' if self.storage_status_code == 200 else self.make_error_sentence(self.storage_status_code)}")
+        self.arduino_status_label.config(text=f"{': Connected' if self.arduino_status_code == 200 else self.make_error_sentence(self.arduino_status_code)}")
     
     def update_plot(self):
-        if len(self.time_plant_plot) <= 2:
+        if len(self.time_arduino_plot) <= 2:
             return
         
         self.ax.clear()
@@ -316,10 +268,10 @@ class PressureLevelPlotter:
         
         marker_size = 3
         
-        self.ax.plot(self.time_plant_plot, self.data_plant_plot[0], marker='o', color='blue', label="Volume", markersize=marker_size)
+        self.ax.plot(self.time_arduino_plot, self.data_arduino_plot[2], marker='o', color='blue', label="Volume", markersize=marker_size)
         
-        self.ax2.plot(self.time_plant_plot, self.data_plant_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
-        self.ax2.plot(self.time_storage_plot, self.data_storage_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
+        self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
+        self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
         
         ax2_color = 'red'
         
@@ -332,17 +284,17 @@ class PressureLevelPlotter:
         self.ax2.yaxis.tick_right()  # y축 눈금을 오른쪽으로 이동
     
         # 그리드 추가
-        self.ax.grid(True)
-        self.ax2.grid(color=ax2_color)
+        self.ax.grid(True)  # RFM Plot에 그리드 추가
+        self.ax2.grid(color=ax2_color)  # DRC91C Plot에 그리드 추가
     
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
-        max_pressure = max(10, max(self.data_plant_plot[1]), max(self.data_storage_plot[0]))
+        max_pressure = max(10, max(self.data_arduino_plot[1]), max(self.data_arduino_plot[0]))
         if self.enable_localmaxmin.get() == 1:
             self.draw_local_maxmin(self.ax2, max_pressure)
 
-        self.ax.set_ylim(0, max(100, max(self.data_plant_plot[0])))
+        self.ax.set_ylim(0, max(100, max(self.data_arduino_plot[2])))
         self.ax2.set_ylim(0, max_pressure)
             
         self.ax.autoscale_view()
@@ -366,55 +318,55 @@ class PressureLevelPlotter:
 
     def draw_local_maxmin(self, ax, max_pressure):
         # Find local maxima and minima for plant pressure
-        peaks = self.find_peaks(self.data_plant_plot[1])
-        valleys = self.find_peaks([-x for x in self.data_plant_plot[1]])  # Invert data to find minima
+        peaks = self.find_peaks(self.data_arduino_plot[1])
+        valleys = self.find_peaks([-x for x in self.data_arduino_plot[1]])  # Invert data to find minima
 
         for peak in peaks: # Annotate local maxima
-            ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
-                            (self.time_plant_plot[peak], min(self.data_plant_plot[1][peak], max_pressure) - 1),
+            ax.annotate(f'P_pl = {self.data_arduino_plot[1][peak]:.2f} psi\nP_st = {self.data_arduino_plot[0][peak]:.2f} psi',
+                            (self.time_arduino_plot[peak], min(self.data_arduino_plot[1][peak], max_pressure) - 1),
                             textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
             # vertical line
-            ax.plot([self.time_plant_plot[peak], self.time_plant_plot[peak]], [0, max_pressure], 'g--', alpha=0.5)
-            ax.annotate(f'{self.time_plant_plot[peak].strftime("%H:%M:%S")}',
-                            (self.time_plant_plot[peak], 0),
-                            textcoords="data", xytext=(self.time_plant_plot[peak], -1),
+            ax.plot([self.time_arduino_plot[peak], self.time_arduino_plot[peak]], [0, max_pressure], 'g--', alpha=0.5)
+            ax.annotate(f'{self.time_arduino_plot[peak].strftime("%H:%M:%S")}',
+                            (self.time_arduino_plot[peak], 0),
+                            textcoords="data", xytext=(self.time_arduino_plot[peak], -1),
                             ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
 
         for valley in valleys: # Annotate local minima
-            ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
-                            (self.time_plant_plot[valley], max(self.data_plant_plot[1][valley], 0) + 1),
+            ax.annotate(f'P_pl = {self.data_arduino_plot[1][valley]:.2f} psi\nP_st = {self.data_arduino_plot[0][valley]:.2f} psi',
+                            (self.time_arduino_plot[valley], max(self.data_arduino_plot[1][valley], 0) + 1),
                             textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
             # vertical line
-            ax.plot([self.time_plant_plot[valley], self.time_plant_plot[valley]], [0, max_pressure], 'g--', alpha=0.5)
-            ax.annotate(f'{self.time_plant_plot[valley].strftime("%H:%M:%S")}',
-                            (self.time_plant_plot[valley], 0),
-                            textcoords="data", xytext=(self.time_plant_plot[valley], -1),
+            ax.plot([self.time_arduino_plot[valley], self.time_arduino_plot[valley]], [0, max_pressure], 'g--', alpha=0.5)
+            ax.annotate(f'{self.time_arduino_plot[valley].strftime("%H:%M:%S")}',
+                            (self.time_arduino_plot[valley], 0),
+                            textcoords="data", xytext=(self.time_arduino_plot[valley], -1),
                             ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
         
         # Find local maxima and minima for storage pressure
-        peaks = self.find_peaks(self.data_storage_plot[0])
-        valleys = self.find_peaks([-x for x in self.data_storage_plot[0]])
+        peaks = self.find_peaks(self.data_arduino_plot[0])
+        valleys = self.find_peaks([-x for x in self.data_arduino_plot[0]])
         
         for peak in peaks:
-            ax.annotate(f'P_pl = {self.data_plant_plot[1][peak]:.2f} psi\nP_st = {self.data_storage_plot[0][peak]:.2f} psi',
-                            (self.time_storage_plot[peak], min(self.data_storage_plot[0][peak], max_pressure) - 1),
+            ax.annotate(f'P_pl = {self.data_arduino_plot[1][peak]:.2f} psi\nP_st = {self.data_arduino_plot[0][peak]:.2f} psi',
+                            (self.time_arduino_plot[peak], min(self.data_arduino_plot[0][peak], max_pressure) - 1),
                             textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
             # vertical line
-            ax.plot([self.time_storage_plot[peak], self.time_storage_plot[peak]], [0, max_pressure], 'r--', alpha=0.5)
-            ax.annotate(f'{self.time_storage_plot[peak].strftime("%H:%M:%S")}',
-                            (self.time_storage_plot[peak], 0),
-                            textcoords="data", xytext=(self.time_storage_plot[peak], -1),
+            ax.plot([self.time_arduino_plot[peak], self.time_arduino_plot[peak]], [0, max_pressure], 'r--', alpha=0.5)
+            ax.annotate(f'{self.time_arduino_plot[peak].strftime("%H:%M:%S")}',
+                            (self.time_arduino_plot[peak], 0),
+                            textcoords="data", xytext=(self.time_arduino_plot[peak], -1),
                             ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
             
         for valley in valleys:
-            ax.annotate(f'P_pl = {self.data_plant_plot[1][valley]:.2f} psi\nP_st = {self.data_storage_plot[0][valley]:.2f} psi',
-                            (self.time_storage_plot[valley], max(self.data_storage_plot[0][valley], 0) + 1),
+            ax.annotate(f'P_pl = {self.data_arduino_plot[1][valley]:.2f} psi\nP_st = {self.data_arduino_plot[0][valley]:.2f} psi',
+                            (self.time_arduino_plot[valley], max(self.data_arduino_plot[0][valley], 0) + 1),
                             textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
             # vertical line
-            ax.plot([self.time_storage_plot[valley], self.time_storage_plot[valley]], [0, max_pressure], 'r--', alpha=0.5)
-            ax.annotate(f'{self.time_storage_plot[valley].strftime("%H:%M:%S")}',
-                            (self.time_storage_plot[valley], 0),
-                            textcoords="data", xytext=(self.time_storage_plot[valley], -1),
+            ax.plot([self.time_arduino_plot[valley], self.time_arduino_plot[valley]], [0, max_pressure], 'r--', alpha=0.5)
+            ax.annotate(f'{self.time_arduino_plot[valley].strftime("%H:%M:%S")}',
+                            (self.time_arduino_plot[valley], 0),
+                            textcoords="data", xytext=(self.time_arduino_plot[valley], -1),
                             ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
 
     def set_axes_margin(self):
@@ -439,7 +391,7 @@ class PressureLevelPlotter:
         
         self.figure.autofmt_xdate()
 
-    def save_log(self, time, plant_data, storage_data):
+    def save_log(self, time, arduino_data):
         # 로그 폴더 경로 설정
         log_dir = "log_pressurelevel"
         
@@ -459,7 +411,7 @@ class PressureLevelPlotter:
         
         # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {plant_data[0]:.2f} V, {plant_data[1]:.2f} psi, {storage_data[0]:.2f} psi\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} V, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi\n")
 
 
 if __name__ == "__main__":
