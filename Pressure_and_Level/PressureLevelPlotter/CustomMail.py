@@ -34,7 +34,7 @@ def send_mail(subject, content):
             RECIPIENT = f.readlines()
     except:
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open('log.txt', 'a') as file:
+        with open('maillog.txt', 'a') as file:
             # 한 줄의 로그 작성
             log_message = f'[{current_time}] 이메일 발신자/수신자 목록을 불러오는 데에 실패했습니다.\n'
             file.write(log_message)
