@@ -14,8 +14,6 @@ from CustomDateLocator import CustomDateLocator
 from VariousTimeDeque import VariousTimeDeque
 from CustomMail import send_mail
 
-import numpy as np
-
 MAXLEN = 100
 
 
@@ -312,8 +310,23 @@ class PressureLevelPlotter:
         self.canvas.draw()
 
     def find_peaks(self, data):
-        data_smooth = [sum(list(data)[int(max(i-2, 0)):int(min(i+3, len(data)))]) / (min(i+3, len(data)) - max(i-2, 0)) for i in range(len(data))]
-        peaks = [i for i in range(2, len(data_smooth)-2) if data_smooth[i] == max(data_smooth[i-2:i+3])]
+        threshold = 0.1
+        width = 4
+        window_size = 2 * width + 1
+
+        # data smoothing
+        data_smooth = [
+            sum(data[max(i - width, 0):min(i + width + 1, len(data))]) / (min(i + width + 1, len(data)) - max(i - width, 0))
+            for i in range(len(data))
+        ]
+
+        # find peaks
+        peaks = [
+            i for i in range(width, len(data_smooth) - width)
+            if data_smooth[i] == max(data_smooth[i - width:i + width + 1]) and
+            max(data_smooth[i - width:i + width + 1]) - min(data_smooth[i - width:i + width + 1]) > threshold
+        ]
+
         return peaks
 
     def draw_local_maxmin(self, ax, max_pressure):
