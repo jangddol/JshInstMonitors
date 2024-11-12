@@ -18,7 +18,7 @@ def cal_pressure_storage(storage_pressure_bit):
 
 def cal_pressure_plant(plant_pressure_bit):
     plant_pressure_bit = float(plant_pressure_bit)
-    plant_pressure = 0.01929 * plant_pressure_bit - 3.54868
+    plant_pressure = 0.01865 * plant_pressure_bit - 3.40120
     return plant_pressure
 
 def level_to_volume(x):
@@ -34,7 +34,7 @@ def level_to_volume(x):
 
 def cal_volume_plant(plant_volume_bit):
     plant_volume_bit = float(plant_volume_bit)
-    plant_volume_level = 0.06647 * plant_volume_bit
+    plant_volume_level = 0.06807 * plant_volume_bit - 0.81458
     plant_volume = level_to_volume(plant_volume_level)
     return plant_volume
 
