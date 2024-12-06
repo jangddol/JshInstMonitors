@@ -268,18 +268,21 @@ class RFMApp:
     def toggle_switch(self, switch_index, last_switch_state):
         if last_switch_state:
             self.toggleStateStrings[switch_index] = TOGGLE_STATE_OFF
-            if self.channels[switch_index] != Channel.CH_UNKNOWN:
-                self.flowSetPoints_Shown[switch_index] = "  paused"
-                self.flowSetPoint_Entry[switch_index] = ""
-
+            if self.channels[switch_index] == Channel.CH_UNKNOWN:
+                return
+            
+            self.flowSetPoints_Shown[switch_index] = "  paused"
+            self.flowSetPoint_Entry[switch_index] = ""
             self.serial.writeChannelOff_serial(self.channels[switch_index])
         else:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
                 self.toggleStateStrings[switch_index] = TOGGLE_STATE_SELECT_CHANNEL
-            else:
-                self.toggleStateStrings[switch_index] = TOGGLE_STATE_ON
-                self.flowSetPoints_Shown[switch_index] = "  " + self.flowSetPoints_Sended[switch_index]
-
+                return
+            
+            self.toggleStateStrings[switch_index] = TOGGLE_STATE_ON
+            self.flowSetPoints_Shown[switch_index] = "  0"
+            self.flowSetPoints_Sended[switch_index] = ""
+            self.serial.writeFlowSetpoint_serial(0, self.channels[switch_index])
             self.serial.writeChannelOn_serial(self.channels[switch_index])
 
     def on_mini_toggle(self):
@@ -397,13 +400,15 @@ class RFMApp:
     def update_flow_setpoint(self, index):
         if self.channels[index] == Channel.CH_UNKNOWN:
             self.flowSetPoints_Shown[index] = "  Set Channel"
-        else:
-            if self.is_valid_flow_setpoint(self.flowSetPoint_Entry[index]):
-                self.serial.writeFlowSetpoint_serial(self.flowSetPoint_Entry[index], self.channels[index])
-                self.flowSetPoints_Shown[index] = f"  {self.flowSetPoint_Entry[index]}"
-                self.flowSetPoints_Sended[index] = self.flowSetPoint_Entry[index]
-            else:
-                self.flowSetPoints_Shown[index] = "  Input invalid"
+            return
+
+        if not self.is_valid_flow_setpoint(self.flowSetPoint_Entry[index]):
+            self.flowSetPoints_Shown[index] = "  Input invalid"
+            return
+
+        self.serial.writeFlowSetpoint_serial(self.flowSetPoint_Entry[index], self.channels[index])
+        self.flowSetPoints_Shown[index] = f"  {self.flowSetPoint_Entry[index]}"
+        self.flowSetPoints_Sended[index] = self.flowSetPoint_Entry[index]
 
     def apply_changed_channel(self, index):
         channelEntry_int = 0
