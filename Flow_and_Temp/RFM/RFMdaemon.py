@@ -1,7 +1,6 @@
 import json
 import tkinter as tk  # Or your chosen GUI framework
 import numpy as np
-from collections import deque
 import time
 
 from RFMserial import RFMserial
@@ -54,6 +53,7 @@ TOGGLE_STATE_SELECT_CHANNEL = "SelectChannel"
 
 # max length of data queue
 MAXLEN = 100
+
 
 class RFMApp:
     def __init__(self, master, port):
