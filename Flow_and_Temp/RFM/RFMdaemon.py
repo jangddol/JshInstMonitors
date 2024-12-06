@@ -422,7 +422,7 @@ class RFMApp:
     def is_key_code_change_highlight_entry(self, key_code):
         return key_code == 'Tab' or key_code == 'Left' or key_code == 'Right' or key_code == 'Up' or key_code == 'Down'
     
-    def change_highlight_entry_using_keycode(self, key_code, highlighted_entry):
+    def get_highlight_entry_using_keycode(self, key_code, highlighted_entry):
         if key_code == 'Tab':
             highlighted_entry = highlighted_entry + 1
         if highlighted_entry == COLUMNNUM * 2 + 1:
@@ -431,7 +431,8 @@ class RFMApp:
 
     def key_pressed(self, event):
         if self.is_key_code_change_highlight_entry(event.keysym):
-            self.change_highlight_entry_using_keycode(event.keysym, self.highlighted_entry)
+            highlight_entry = self.get_highlight_entry_using_keycode(event.keysym, self.highlighted_entry)
+            self.change_highlight_entry_to(highlight_entry)
         elif event.keysym == 'Return' or event.keysym == 'Enter':
             if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStateStrings[0] == TOGGLE_STATE_ON:
                 self.update_flow_setpoint(0)
@@ -495,8 +496,8 @@ class RFMApp:
         return 1 + self.get_column_index_from_mouse(mouseX) + COLUMNNUM * self.get_row_index_from_mouse(mouseY)
         
     def mouse_pressed(self, event):
-        self.highlighted_entry = self.get_highlited_entry_from_mouse(event.x, event.y)
-        self.change_highlight_entry_to(self.highlighted_entry)
+        highlighted_entry = self.get_highlited_entry_from_mouse(event.x, event.y)
+        self.change_highlight_entry_to(highlighted_entry)
 
     def change_highlight_entry_to(self, entry):
         self.highlighted_entry = entry
