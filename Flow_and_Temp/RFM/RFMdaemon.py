@@ -8,7 +8,7 @@ from RFMserial import RFMserial
 from channel import Channel, ChannelName, convert_int_to_channel
 from schedularwindow import Action, SchedularWindow, ScheduleWidget
 
-SERIAL_ON = False
+SERIAL_ON = True
 
 # graphic constants
 COLUMNNUM = 3
@@ -60,7 +60,7 @@ class RFMApp:
         self.master = master
         self.setup_initial_state()
         self.setup_ui()
-        self.setup_data_collection()
+        self.setup_schedular()
         self.setup_serial(SERIAL_ON, port)
         self.main_loop()
 
@@ -130,9 +130,7 @@ class RFMApp:
         self.master.bind("<Button-1>", self.mouse_pressed)
         self.master.bind("<Configure>", self.on_resize)
 
-    def setup_data_collection(self):
-        self.dataqueue_10min = [deque(maxlen=MAXLEN) for _ in range(COLUMNNUM + 1)]
-        self.lasttime = time.time()
+    def setup_schedular(self):
         self.last_schedule_handle_time_in_min = self.get_time_in_min()
         self.schedular_window = None
 
