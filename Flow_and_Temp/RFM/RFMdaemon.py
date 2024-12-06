@@ -68,7 +68,6 @@ class RFMApp:
         self.flowSetPoint_Entry = [""] * COLUMNNUM
         self.flowSetPoints_Shown = ["  Set Channel"] * COLUMNNUM
         self.toggleStateStrings = [TOGGLE_STATE_OFF] * COLUMNNUM
-        self.flowSetPoints_Sended = [""] * COLUMNNUM
         self.channels = [Channel.CH_UNKNOWN] * COLUMNNUM
         self.channelsEntry = [""] * COLUMNNUM
         self.flowSetPointBkgColors = [COLOR_BLACK] * COLUMNNUM
@@ -281,7 +280,6 @@ class RFMApp:
             
             self.toggleStateStrings[switch_index] = TOGGLE_STATE_ON
             self.flowSetPoints_Shown[switch_index] = "  0"
-            self.flowSetPoints_Sended[switch_index] = ""
             self.serial.writeFlowSetpoint_serial(0, self.channels[switch_index])
             self.serial.writeChannelOn_serial(self.channels[switch_index])
 
@@ -408,7 +406,6 @@ class RFMApp:
 
         self.serial.writeFlowSetpoint_serial(self.flowSetPoint_Entry[index], self.channels[index])
         self.flowSetPoints_Shown[index] = f"  {self.flowSetPoint_Entry[index]}"
-        self.flowSetPoints_Sended[index] = self.flowSetPoint_Entry[index]
 
     def apply_changed_channel(self, index):
         channelEntry_int = 0
@@ -419,7 +416,6 @@ class RFMApp:
         self.channelsEntry[index] = ""
         self.channels[index] = convert_int_to_channel(channelEntry_int)
         if self.channels[index] != Channel.CH_UNKNOWN:
-            self.flowSetPoints_Sended[index] = ""
             self.flowSetPoints_Shown[index] = "  paused"
             self.serial.setReadingChannel_serial(self.channels)
 
