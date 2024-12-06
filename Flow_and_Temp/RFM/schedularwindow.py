@@ -47,7 +47,7 @@ class ScheduleWidget:
         self.minute_var = tk.IntVar(value=0)
         self.channel_var = tk.StringVar(value=ChannelName.Tip.value)
         self.action_var = tk.StringVar(value=Action.On.value)
-        self.number_var = tk.StringVar(value="1")  # StringVar로 변경
+        self.number_var = tk.IntVar(value=0)
 
         self.create_widgets()
     
@@ -57,11 +57,11 @@ class ScheduleWidget:
 
     @property
     def hour(self) -> int:
-        return self.hour_var.get()
+        return int(str(self.hour_var.get()))
     
     @property
     def minute(self) -> int:
-        return self.minute_var.get()
+        return int(str(self.minute_var.get()))
     
     @property
     def channelname(self) -> ChannelName:
@@ -73,7 +73,7 @@ class ScheduleWidget:
     
     @property
     def number(self) -> int:
-        return int(self.number_var.get())
+        return int(str(self.number_var.get()))
     
     def create_widgets(self):
         tk.Label(self.frame, text=f"스케줄 {self.index + 1}").grid(row=0, column=0, columnspan=5)
@@ -82,12 +82,12 @@ class ScheduleWidget:
         tk.OptionMenu(self.frame, self.day_var, Wday.Mon.value, Wday.Tue.value, Wday.Wed.value, Wday.Thu.value, Wday.Fri.value, Wday.Sat.value, Wday.Sun.value).grid(row=1, column=1)
 
         tk.Label(self.frame, text="시간:").grid(row=1, column=2)
-        self.hour_spinbox = tk.Spinbox(self.frame, from_=0, to=23, textvariable=self.hour_var, width=3, format="%02.0f", validate="key")
+        self.hour_spinbox = tk.Spinbox(self.frame, from_=0, to=23, textvariable=self.hour_var, width=3, validate="key")
         self.hour_spinbox['validatecommand'] = (self.frame.register(self.validate_hour), '%P')
         self.hour_spinbox.grid(row=1, column=3)
 
         tk.Label(self.frame, text="분:").grid(row=1, column=4)
-        self.minute_spinbox = tk.Spinbox(self.frame, from_=0, to=59, textvariable=self.minute_var, width=3, format="%02.0f", validate="key")
+        self.minute_spinbox = tk.Spinbox(self.frame, from_=0, to=59, textvariable=self.minute_var, width=3, validate="key")
         self.minute_spinbox['validatecommand'] = (self.frame.register(self.validate_minute), '%P')
         self.minute_spinbox.grid(row=1, column=5)
 
@@ -99,9 +99,9 @@ class ScheduleWidget:
         action_menu.grid(row=1, column=9)
 
         tk.Label(self.frame, text="숫자:").grid(row=1, column=10)
-        self.number_entry = tk.Entry(self.frame, textvariable=self.number_var, validate="key")
-        self.number_entry['validatecommand'] = (self.frame.register(self.validate_integer), '%P')
-        self.number_entry.grid(row=1, column=11)
+        self.number_spinbox = tk.Spinbox(self.frame, from_=0, to=99, textvariable=self.number_var, width=3, validate="key")
+        self.number_spinbox['validatecommand'] = (self.frame.register(self.validate_integer), '%P')
+        self.number_spinbox.grid(row=1, column=11)
         self.update_number_entry()
 
         tk.Button(self.frame, text="위로", command=self.move_up).grid(row=1, column=12)
@@ -110,39 +110,30 @@ class ScheduleWidget:
 
         self.frame.pack(fill=tk.X)
 
-    def validate_hour(self, new_value):
-        if new_value == "":
+    def validate_hour(self, value_if_allowed):
+        value_if_allowed = str(value_if_allowed)
+        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 23:
             return True
-        try:
-            int_value = int(new_value)
-            return 0 <= int_value <= 23 and not new_value.startswith('0')
-        except ValueError:
-            return False
+        return False
 
-    def validate_minute(self, new_value):
-        if new_value == "":
+    def validate_minute(self, value_if_allowed):
+        value_if_allowed = str(value_if_allowed)
+        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 59:
             return True
-        try:
-            int_value = int(new_value)
-            return 0 <= int_value <= 59 and not new_value.startswith('0')
-        except ValueError:
-            return False
+        return False
 
-    def validate_integer(self, new_value):
-        if new_value == "":
-            return True  # 빈 문자열은 허용
-        try:
-            int_value = int(new_value)
-            return True  # 정수로 변환 가능하면 허용
-        except ValueError:
-            return False  # 정수가 아니면 거부
+    def validate_integer(self, value_if_allowed):
+        value_if_allowed = str(value_if_allowed)
+        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 99:
+            return True
+        return False
 
     def update_number_entry(self, *args):
         if self.action_var.get() in ["On", "Off"]:
-            self.number_entry.config(state='disabled')  # 비활성화
+            self.number_spinbox.config(state='disabled')  # 비활성화
             self.number_var.set("")  # 비활성화 시 값 초기화
         else:
-            self.number_entry.config(state='normal')  # 활성화
+            self.number_spinbox.config(state='normal')  # 활성화
 
     def move_up(self):
         self.parent.move_schedule(self.index, -1)
@@ -289,6 +280,32 @@ class SchedularWindow:
             messagebox.showerror("오류", f"파일을 불러오는 중 오류가 발생했습니다: {str(e)}")
 
     def on_close(self):
+        for widget in self.schedule_widgets:
+            try:
+                if not widget.validate_hour(widget.hour_var.get()):
+                    messagebox.showerror("오류", "시간 입력이 잘못되었습니다.")
+                    return
+            except Exception as e:
+                messagebox.showerror("오류", f"시간 입력이 잘못되었습니다: {str(e)}")
+                print(f"Exception during hour validation: {str(e)}")
+                return
+            try:
+                if not widget.validate_minute(widget.minute_var.get()):
+                    messagebox.showerror("오류", "분 입력이 잘못되었습니다.")
+                    return
+            except Exception as e:
+                messagebox.showerror("오류", f"분 입력이 잘못되었습니다: {str(e)}")
+                print(f"Exception during minute validation: {str(e)}")
+                return
+            if widget.action == Action.Setpoint:
+                try:
+                    if not widget.validate_integer(widget.number_var.get()):
+                        messagebox.showerror("오류", "숫자 입력이 잘못되었습니다.")
+                        return
+                except Exception as e:
+                    messagebox.showerror("오류", f"숫자 입력이 잘못되었습니다: {str(e)}")
+                    print(f"Exception during number validation: {str(e)}")
+                    return
         self.root.withdraw()
     
     def show(self):
