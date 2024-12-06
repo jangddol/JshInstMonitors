@@ -2,6 +2,7 @@ import json
 import tkinter as tk  # Or your chosen GUI framework
 import numpy as np
 import time
+from enum import Enum
 
 from RFMserial import RFMserial
 from channel import Channel, ChannelName, convert_int_to_channel
@@ -46,10 +47,11 @@ ENTRY_HIGHLIGHTED_CH_L = 4
 ENTRY_HIGHLIGHTED_CH_M = 5
 ENTRY_HIGHLIGHTED_CH_R = 6
 
-# toggleStateStrings constant
-TOGGLE_STATE_ON = "  ON"
-TOGGLE_STATE_OFF = "  OFF"
-TOGGLE_STATE_SELECT_CHANNEL = "SelectChannel"
+# toggleStates constant
+class ToggleState(Enum):
+    On = 1
+    Off = 2
+    SelectChannel = 3
 
 # max length of data queue
 MAXLEN = 100
@@ -67,7 +69,7 @@ class RFMApp:
     def initialize_arrays(self):
         self.flowSetPoint_Entry = [""] * COLUMNNUM
         self.flowSetPoints_Shown = ["  Set Channel"] * COLUMNNUM
-        self.toggleStateStrings = [TOGGLE_STATE_OFF] * COLUMNNUM
+        self.toggleStates = [ToggleState.Off] * COLUMNNUM
         self.channels = [Channel.CH_UNKNOWN] * COLUMNNUM
         self.channelsEntry = [""] * COLUMNNUM
         self.flowSetPointBkgColors = [COLOR_BLACK] * COLUMNNUM
@@ -225,13 +227,13 @@ class RFMApp:
         
         action = schedule.action
         if action == Action.On:
-            if self.toggleStateStrings[channel_index] == TOGGLE_STATE_OFF:
+            if self.toggleStates[channel_index] == ToggleState.Off:
                 self.on_switch_toggle(channel_index)
         elif action == Action.Off:
-            if self.toggleStateStrings[channel_index] == TOGGLE_STATE_ON:
+            if self.toggleStates[channel_index] == ToggleState.On:
                 self.on_switch_toggle(channel_index)
         elif action == Action.Setpoint:
-            if self.toggleStateStrings[channel_index] == TOGGLE_STATE_ON:
+            if self.toggleStates[channel_index] == ToggleState.On:
                 self.flowSetPoint_Entry[channel_index] = str(schedule.number)
                 self.update_flow_setpoint(channel_index)
 
@@ -266,7 +268,7 @@ class RFMApp:
 
     def toggle_switch(self, switch_index, last_switch_state):
         if last_switch_state:
-            self.toggleStateStrings[switch_index] = TOGGLE_STATE_OFF
+            self.toggleStates[switch_index] = ToggleState.Off
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
                 return
             
@@ -275,12 +277,12 @@ class RFMApp:
             self.serial.writeChannelOff_serial(self.channels[switch_index])
         else:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
-                self.toggleStateStrings[switch_index] = TOGGLE_STATE_SELECT_CHANNEL
+                self.toggleStates[switch_index] = ToggleState.SelectChannel
                 return
             
-            self.toggleStateStrings[switch_index] = TOGGLE_STATE_ON
+            self.toggleStates[switch_index] = ToggleState.On
             self.flowSetPoints_Shown[switch_index] = "  0"
-            self.serial.writeFlowSetpoint_serial(0, self.channels[switch_index])
+            self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
             self.serial.writeChannelOn_serial(self.channels[switch_index])
 
     def on_mini_toggle(self):
@@ -434,30 +436,30 @@ class RFMApp:
             highlight_entry = self.get_highlight_entry_using_keycode(event.keysym, self.highlighted_entry)
             self.change_highlight_entry_to(highlight_entry)
         elif event.keysym == 'Return' or event.keysym == 'Enter':
-            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStateStrings[0] == TOGGLE_STATE_ON:
+            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStates[0] == ToggleState.On:
                 self.update_flow_setpoint(0)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStateStrings[1] == TOGGLE_STATE_ON:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStates[1] == ToggleState.On:
                 self.update_flow_setpoint(1)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStateStrings[2] == TOGGLE_STATE_ON:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStates[2] == ToggleState.On:
                 self.update_flow_setpoint(2)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStateStrings[0] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStates[0] == ToggleState.Off:
                 self.apply_changed_channel(0)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStateStrings[1] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStates[1] == ToggleState.Off:
                 self.apply_changed_channel(1)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStateStrings[2] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStates[2] == ToggleState.Off:
                 self.apply_changed_channel(2)
         else:
-            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStateStrings[0] == TOGGLE_STATE_ON:
+            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStates[0] == ToggleState.On:
                 self.flowSetPoint_Entry[0] = self.modify_number_string_by_key(self.flowSetPoint_Entry[0], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStateStrings[1] == TOGGLE_STATE_ON:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStates[1] == ToggleState.On:
                 self.flowSetPoint_Entry[1] = self.modify_number_string_by_key(self.flowSetPoint_Entry[1], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStateStrings[2] == TOGGLE_STATE_ON:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStates[2] == ToggleState.On:
                 self.flowSetPoint_Entry[2] = self.modify_number_string_by_key(self.flowSetPoint_Entry[2], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStateStrings[0] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStates[0] == ToggleState.Off:
                 self.channelsEntry[0] = self.modify_number_string_by_key(self.channelsEntry[0], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStateStrings[1] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStates[1] == ToggleState.Off:
                 self.channelsEntry[1] = self.modify_number_string_by_key(self.channelsEntry[1], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStateStrings[2] == TOGGLE_STATE_OFF:
+            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStates[2] == ToggleState.Off:
                 self.channelsEntry[2] = self.modify_number_string_by_key(self.channelsEntry[2], event.keysym, event.char)
 
     def modify_number_string_by_key(self, number_string, key_code, key):
