@@ -192,6 +192,27 @@ class RFMApp:
         # 요일이 같고 시간이 같으면서 (최소 1분에 한번은 update가 돌 것이라는 가정하에)
         # schedule_handle_time이 현재 시간과 다르면 (이는 일주일 중 단 한번만 실행되게끔 보장하기 위함이다.)
         # schdular에 있는 동작을 수행한다.
+        try:
+            schedule.day.get_int()
+        except:
+            print("Invalid schedule data : day")
+            return False
+        try:
+            schedule.hour
+        except:
+            print("Invalid schedule data : hour")
+            return False
+        try:
+            schedule.minute
+        except:
+            print("Invalid schedule data : minute")
+            return False
+        if schedule.action == Action.Setpoint:
+            try:
+                schedule.number
+            except:
+                print("Invalid schedule data : setpoint")
+                return False
         is_same_day = schedule.day.get_int() == localtime.tm_wday
         is_same_time: bool = schedule.hour == localtime.tm_hour and schedule.minute == localtime.tm_min
         is_different_time_with_last_time = self.last_schedule_handle_time_in_min != self.get_time_in_min()
