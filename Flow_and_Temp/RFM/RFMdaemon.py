@@ -247,7 +247,6 @@ class RFMApp:
         self.fillEntryBkgColor()
         self.displayTexts()
         self.place_buttons()
-        self.change_highlight_entry_to(self.highlighted_entry)
 
     def on_resize(self, event):
         self.width = event.width
