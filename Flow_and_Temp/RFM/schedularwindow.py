@@ -1,5 +1,7 @@
 import json
 import tkinter as tk
+import sys
+import os
 from tkinter import filedialog
 from tkinter import messagebox
 from channel import ChannelName
@@ -149,6 +151,18 @@ class ScheduleWidget:
         self.frame = tk.Frame(self.parent.schedule_frame)
         self.create_widgets()
 
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 class SchedularWindow:
     def __init__(self, mother):
         self.mother = mother
@@ -162,7 +176,7 @@ class SchedularWindow:
             return
 
         self.root = tk.Toplevel(self.mother)
-        self.root.iconbitmap("MFC.ico")
+        self.root.iconbitmap(resource_path("MFC.ico"))
         self.root.title("Schedular")
         self.root.geometry("700x300")
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
