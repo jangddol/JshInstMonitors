@@ -2,6 +2,8 @@ import json
 import tkinter as tk  # Or your chosen GUI framework
 import numpy as np
 import time
+import os
+import sys
 from enum import Enum
 
 from RFMserial import RFMserial
@@ -65,6 +67,7 @@ class RFMApp:
         self.setup_schedular()
         self.setup_serial(SERIAL_ON, port)
         self.main_loop()
+        self.last_read_time = time.time()
 
     def initialize_arrays(self):
         self.flowSetPoint_Entry = [""] * COLUMNNUM
@@ -173,6 +176,8 @@ class RFMApp:
             if serial_buffer:
                 temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
                 flow_values[2] = temp_flow_values[1]
+
+        self.last_read_time = time.time()
 
         return flow_values
 
@@ -555,6 +560,18 @@ def open_config_file(file_path: str):
         
         return arduino_port, localserver_port
 
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 if __name__ == "__main__":
     import threading
     from flask import Flask, jsonify
@@ -574,12 +591,12 @@ if __name__ == "__main__":
 
     @app.route('/get_value', methods=['GET'])
     def get_value():
-        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2]})
+        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2], 'timestamp': rfmapp.last_read_time})
 
     def run_app(port):
         # GUI 애플리케이션 실행
         master = tk.Tk()
-        master.iconbitmap("MFC.ico")
+        master.iconbitmap(resource_path("MFC.ico"))
         global rfmapp
         rfmapp = RFMApp(master, port)
         rfmapp.master.mainloop()

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import os
+import sys
 import requests
 import threading
 import time
@@ -154,7 +155,7 @@ class PressureLevelPlotter:
         if loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
-            if self.arduino_deque.get_last_data()[0] == [0, 0, 0]:
+            if self.arduino_status_code != 200:
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Arduino is disconnected."
@@ -203,13 +204,19 @@ class PressureLevelPlotter:
         try:
             response = requests.get("http://127.0.0.1:5003/Meas", timeout=1)
             self.arduino_status_code = response.status_code
-            if response.status_code == 200:
-                json = response.json()
-                list_of_str = [json['P_st'], json['P_pl'], json['V_pl']]
-                return [float(x.split(' ')[0]) for x in list_of_str]
-            else:
-                print(f"Error fetching from Storage: {response.status_code}")
+            if response.status_code != 200:
+                print(f"Error fetching from Arduino: {response.status_code}")
                 return [0, 0, 0]
+            
+            json = response.json()
+            
+            if time.time() - json['timestamp'] > 5:
+                self.arduino_status_code = 'DataTooOld'
+                print("Data is too old")
+                return [0, 0]
+            
+            list_of_str = [json['P_st'], json['P_pl'], json['V_pl']]
+            return [float(x.split(' ')[0]) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.arduino_status_code = 'ConnectionError'
             print(f"Connection error fetching from Storage: {e}")
@@ -427,9 +434,20 @@ class PressureLevelPlotter:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} V, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi\n")
 
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap("PressureLevelPlotter.ico")
+    root.iconbitmap(resource_path("PressureLevelPlotter.ico"))
     app = PressureLevelPlotter(root)
     app.start()
     root.mainloop()

@@ -1,9 +1,11 @@
 import serial
 import numpy as np
+import time
 
 storage_pressure = None
 plant_pressure = None
 plant_volume = None
+last_read_time = time.time()
 
 def open_serials():
     Arduino = serial.Serial('COM4', 9600, timeout=1)
@@ -50,6 +52,7 @@ def serial_mediator():
                 global storage_pressure
                 global plant_pressure
                 global plant_volume
+                global last_read_time
                 if storage_pressure is None:
                     storage_pressure = cal_pressure_storage(P_st_bit)
                 else:
@@ -62,6 +65,7 @@ def serial_mediator():
                     plant_volume = cal_volume_plant(V_pl_bit)
                 else:
                     plant_volume = (1-BETA) * cal_volume_plant(V_pl_bit) + BETA * plant_volume
+                last_read_time = time.time()
         except Exception as e:
             print(f"Error : {e}")
             Arduino.close()
@@ -82,10 +86,11 @@ if __name__ == "__main__":
         global storage_pressure
         global plant_pressure
         global plant_volume
+        global last_read_time
         P_st_string = 'None' if storage_pressure is None else f"{storage_pressure:.3f}"
         P_pl_string = 'None' if plant_pressure is None else f"{plant_pressure:.3f}"
         V_pl_string = 'None' if plant_volume is None else f"{plant_volume:.3f}"
-        return jsonify({'P_st': P_st_string, 'P_pl': P_pl_string, 'V_pl': V_pl_string})
+        return jsonify({'P_st': P_st_string, 'P_pl': P_pl_string, 'V_pl': V_pl_string, 'timestamp': last_read_time})
 
     def run_flask():
         app.run(host='0.0.0.0', port=5003, use_reloader=False)
