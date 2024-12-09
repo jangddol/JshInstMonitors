@@ -5,6 +5,7 @@ import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import os
+import sys
 import requests
 import threading
 import time
@@ -13,6 +14,7 @@ from tkinter import ttk
 
 from CustomDateLocator import CustomDateLocator
 from VariousTimeDeque import VariousTimeDeque
+from CustomMail import send_mail
 
 MAXLEN = 100
 
@@ -166,6 +168,18 @@ class FlowTempPlotter:
         if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
+            if self.rfm_status_code != 200:
+                now = datetime.now()
+                date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                subject = f"{date_str} MKS247C is disconnected."
+                contents = f"Plz check the MKS247C. MKS247C is disconnected at {date_str}."
+                send_mail(subject, contents)
+            if self.drc91c_status_code != 200:
+                now = datetime.now()
+                date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                subject = f"{date_str} Temperature controller is disconnected."
+                contents = f"Plz check the temperature controller. Temperature controller is disconnected at {date_str}."
+                send_mail(subject, contents)
         
         if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
@@ -206,13 +220,19 @@ class FlowTempPlotter:
         try:
             response = requests.get(f"http://127.0.0.1:{self.rfm_localserver_port}/get_value", timeout=1)
             self.rfm_status_code = response.status_code
-            if response.status_code == 200:
-                json = response.json()
-                list_of_str = [json['Tip'], json['Shield'], json['Bypass']]
-                return [float(x) for x in list_of_str]
-            else:
+            if response.status_code != 200:
                 print(f"Error fetching from RFM: {response.status_code}")
                 return [0, 0, 0]
+            
+            json = response.json()
+            
+            if time.time() - json['timestamp'] > 5:
+                self.rfm_status_code = 'DataTooOld'
+                print("Data is too old")
+                return [0, 0, 0]
+            
+            list_of_str = [json['Tip'], json['Shield'], json['Bypass']]
+            return [float(x) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.rfm_status_code = 'ConnectionError'
             print(f"Connection error fetching from RFM: {e}")
@@ -238,13 +258,19 @@ class FlowTempPlotter:
         try:
             response = requests.get(f"http://127.0.0.1:{self.drc91c_localserver_port}/sensor_pair", timeout=1)
             self.drc91c_status_code = response.status_code
-            if response.status_code == 200:
-                json = response.json()
-                list_of_str = [json['valueA'], json['valueB']]
-                return [self.parse_temperature(x) for x in list_of_str]
-            else:
+            if response.status_code != 200:
                 print(f"Error fetching from DRC91C: {response.status_code}")
                 return [0, 0]
+            
+            json = response.json()
+            
+            if time.time() - json['timestamp'] > 5:
+                self.drc91c_status_code = 'DataTooOld'
+                print("Data is too old")
+                return [0, 0]
+            
+            list_of_str = [json['valueA'], json['valueB']]
+            return [self.parse_temperature(x) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.drc91c_status_code = 'ConnectionError'
             print(f"Connection error fetching from RFM: {e}")
@@ -407,6 +433,18 @@ def open_config_file(file_path: str):
         
         return _rfm_localserver_port, _drc91c_localserver_port
 
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 if __name__ == "__main__":
     config_file_path = 'flowtempplotter_config.json'
     try:
@@ -418,7 +456,7 @@ if __name__ == "__main__":
         rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
     
     root = tk.Tk()
-    root.iconbitmap("FlowTempPlotter.ico")
+    root.iconbitmap(resource_path("FlowTempPlotter.ico"))
     app = FlowTempPlotter(root, rfm_localserver_port, drc91c_localserver_port)
     app.start()
     root.mainloop()

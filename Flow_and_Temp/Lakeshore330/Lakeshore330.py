@@ -2,6 +2,7 @@ import pyvisa
 import json 
 import atexit
 from flask import Flask, jsonify
+import time
 
 
 class Lakeshore330:
@@ -54,6 +55,6 @@ if __name__ == '__main__':
     def get_sensor_value_pair():
         valueA, valueB = drc91c.get_sensor_value_pair()
         print(valueA, valueB)
-        return jsonify({'valueA': valueA, 'valueB': valueB})
+        return jsonify({'valueA': valueA, 'valueB': valueB, 'timestamp': time.time()})
 
     app.run(host='0.0.0.0', port=port)
