@@ -276,7 +276,7 @@ class RFMApp:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
                 return
             
-            self.flowSetPoints_Shown[switch_index] = "  paused"
+            self.flowSetPoints_Shown[switch_index] = "paused"
             self.flowSetPoint_Entry[switch_index] = ""
             self.serial.writeChannelOff_serial(self.channels[switch_index])
         else:
@@ -285,7 +285,7 @@ class RFMApp:
                 return
             
             self.toggleStates[switch_index] = ToggleState.On
-            self.flowSetPoints_Shown[switch_index] = "  0"
+            self.flowSetPoints_Shown[switch_index] = "0"
             self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
             self.serial.writeChannelOn_serial(self.channels[switch_index])
 
@@ -353,7 +353,7 @@ class RFMApp:
                 self.canvas.create_text(resize_ratio_x * (10 + i * COLUMNWIDTH), resize_ratio_y * 175,
                                         text=f"Input: {self.flowSetPoint_Entry[i]}", fill='white', font=font, anchor='w')
                 self.canvas.create_text(resize_ratio_x * i * COLUMNWIDTH, resize_ratio_y * 200,
-                                        text=self.flowSetPoints_Shown[i], fill='white', font=font, anchor='w')
+                                        text=f"  {self.flowSetPoints_Shown[i]}", fill='white', font=font, anchor='w')
                 self.canvas.create_text(resize_ratio_x * (10 + i * COLUMNWIDTH), resize_ratio_y * 325,
                                         text=f"Setting {COLUMNNAME[i]} Ch.", fill='white', font=font, anchor='w')
                 self.canvas.create_text(resize_ratio_x * (10 + i * COLUMNWIDTH), resize_ratio_y * 345,
@@ -383,14 +383,14 @@ class RFMApp:
             resize_ratio_x = self.width / (COLUMNNUM * COLUMNWIDTH)
             resize_ratio_y = self.height / HEIGHT
             resize_ratio_tot = (self.height + self.width) / (COLUMNNUM * COLUMNWIDTH + HEIGHT)
+            font_size = int(FONT_SIZE * resize_ratio_tot)
+            font = ('Calibri Light', font_size)
             for i in range(COLUMNNUM):
-                font_size = int(FONT_SIZE * resize_ratio_tot)
-                font = ('Calibri Light', font_size)
                 self.canvas.create_text(resize_ratio_x * (10 + i * COLUMNWIDTH), resize_ratio_y * 80,
                                         text=flowValues[i], fill='white', font=font, anchor='w')
         else:
+            font = ('Calibri Light', FONT_SIZE)
             for i in range(COLUMNNUM):
-                font = ('Calibri Light', FONT_SIZE)
                 self.canvas.create_text(10 + i * COLUMNWIDTH, 80,
                                         text=flowValues[i], fill='white', font=font, anchor='w')
 
@@ -403,15 +403,15 @@ class RFMApp:
     
     def update_flow_setpoint(self, index):
         if self.channels[index] == Channel.CH_UNKNOWN:
-            self.flowSetPoints_Shown[index] = "  Set Channel"
+            self.flowSetPoints_Shown[index] = "Set Channel"
             return
 
         if not self.is_valid_flow_setpoint(self.flowSetPoint_Entry[index]):
-            self.flowSetPoints_Shown[index] = "  Input invalid"
+            self.flowSetPoints_Shown[index] = "Input invalid"
             return
 
         self.serial.writeFlowSetpoint_serial(self.flowSetPoint_Entry[index], self.channels[index])
-        self.flowSetPoints_Shown[index] = f"  {self.flowSetPoint_Entry[index]}"
+        self.flowSetPoints_Shown[index] = self.flowSetPoint_Entry[index]
 
     def apply_changed_channel(self, index):
         channelEntry_int = 0
@@ -422,7 +422,7 @@ class RFMApp:
         self.channelsEntry[index] = ""
         self.channels[index] = convert_int_to_channel(channelEntry_int)
         if self.channels[index] != Channel.CH_UNKNOWN:
-            self.flowSetPoints_Shown[index] = "  paused"
+            self.flowSetPoints_Shown[index] = "paused"
             self.serial.setReadingChannel_serial(self.channels)
 
     def is_key_code_change_highlight_entry(self, key_code):
