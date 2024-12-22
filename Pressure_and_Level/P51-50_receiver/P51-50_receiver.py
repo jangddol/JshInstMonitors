@@ -42,7 +42,8 @@ def cal_volume_plant(plant_volume_bit):
 
 def serial_mediator():
     cutoff_second = 10
-    BETA = np.exp(-2 * np.pi * 0.1 / cutoff_second)
+    arduino_period = 0.5
+    BETA = np.exp(-2 * np.pi * arduino_period / cutoff_second)
     Arduino = open_serials()
     while True:
         try:
