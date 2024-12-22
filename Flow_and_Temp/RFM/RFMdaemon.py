@@ -60,6 +60,11 @@ MAXLEN = 100
 
 
 class RFMApp:
+    DAY_TO_HOUR : Final = 24
+    HOUR_TO_MIN : Final = 60
+    PC_INPUT_MAX : Final = 99
+    ARDUINO_WRITE_MAX : Final = 4095
+    
     def __init__(self, master, port):
         self.master = master
         self.setup_initial_state()
@@ -368,14 +373,16 @@ class RFMApp:
                                         text="Sensing Output", fill='white', font=font, anchor='w')
 
     def parse_flow_serial_buffer(self, flow_string):
-        # XXX0Y.YY is the format of the flow sensor data
-        # XXX * 99 / 40950 is the first channel's flow value
-        # YYY * 99 / 40950 is the second channel's flow value
+        # aaaabb.bb is the format of the flow sensor data
+        # aaaa * (99/10) / 4095 is the first channel's flow value
+        # bbbb * (99/10) / 4095 is the second channel's flow value
         # the magic numbers 99 and 40950 are determined by the flow sensor's characteristics
-        num = float(flow_string) / 100
-        num1 = int(num)
-        flow_L = (float(num1) * 99 / 40950)
-        flow_R = (10000.000 * (num - num1) * 99 / 40950)
+        aaaabbpbb = float(flow_string)
+        aaaapbbbb = aaaabbpbb / 100
+        aaaa = int(aaaapbbbb)
+        bbbb = int((aaaapbbbb - aaaa) * 1e4)
+        flow_L = (float(aaaa) * (self.PC_INPUT_MAX/10) / self.ARDUINO_WRITE_MAX)
+        flow_R = (float(bbbb) * (self.PC_INPUT_MAX/10) / self.ARDUINO_WRITE_MAX)
         return [flow_L, flow_R]
 
     def displayFlowValues(self, flowValues):
@@ -399,7 +406,7 @@ class RFMApp:
             flow_setpoint = int(flow_setpoint_entry)
         except:
             return False
-        return flow_setpoint < 100 and flow_setpoint >= 0
+        return 0 <= flow_setpoint <= self.PC_INPUT_MAX
     
     def update_flow_setpoint(self, index):
         if self.channels[index] == Channel.CH_UNKNOWN:
