@@ -66,6 +66,7 @@ def serial_mediator():
                 else:
                     plant_volume = (1-BETA) * cal_volume_plant(V_pl_bit) + BETA * plant_volume
                 last_read_time = time.time()
+            time.sleep(0.1)
         except Exception as e:
             print(f"Error : {e}")
             Arduino.close()
