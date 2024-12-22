@@ -1,5 +1,6 @@
 import json
-import tkinter as tk  # Or your chosen GUI framework
+import tkinter as tk
+from typing import Final
 import numpy as np
 import time
 import os
@@ -55,8 +56,6 @@ class ToggleState(Enum):
     Off = 2
     SelectChannel = 3
 
-# max length of data queue
-MAXLEN = 100
 
 
 class RFMApp:
@@ -148,11 +147,12 @@ class RFMApp:
 
     def get_time_in_min(self):
         localtime = time.localtime()
-        return localtime.tm_wday * 24 * 60 + localtime.tm_hour * 60 + localtime.tm_min
+        return localtime.tm_wday * self.DAY_TO_HOUR * self.HOUR_TO_MIN + localtime.tm_hour * self.HOUR_TO_MIN + localtime.tm_min
 
     def main_loop(self):
         self.update()
-        self.master.after(100, self.main_loop)  # Schedule next update, 0.1 s
+        UPDATE_INTERVAL_MS = 100
+        self.master.after(UPDATE_INTERVAL_MS, self.main_loop)  # Schedule next update, 0.1 s
 
     def update(self):
         self.draw()
