@@ -1,7 +1,7 @@
 float P_st_filtered = NAN;
 float V_pl_filtered = NAN;
 float P_pl_filtered = NAN;
-float beta = 0.9391; // np.exp(-2*np.pi*1ms/100ms)
+float beta1 = 0.9875; // np.exp(-2*np.pi*1ms/500ms)
 int time_index = 0;
 
 void setup()
@@ -37,11 +37,11 @@ void loop()
   float P_st_float = static_cast<float>(P_st_bit);
   float P_pl_float = static_cast<float>(P_pl_bit);
   float V_pl_float = static_cast<float>(V_pl_bit);
-  P_st_filtered = low_pass_filter(P_st_float, P_st_filtered, beta);
-  P_pl_filtered = low_pass_filter(P_pl_float, P_pl_filtered, beta);
-  V_pl_filtered = low_pass_filter(V_pl_float, V_pl_filtered, beta);
+  P_st_filtered = low_pass_filter(P_st_float, P_st_filtered, beta1);
+  P_pl_filtered = low_pass_filter(P_pl_float, P_pl_filtered, beta1);
+  V_pl_filtered = low_pass_filter(V_pl_float, V_pl_filtered, beta1);
 
-  if (time_index == 99)
+  if (time_index == 499)
   {
     time_index = 0;
     Serial.print(P_st_filtered);
