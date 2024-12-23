@@ -61,11 +61,11 @@ class ToggleState(Enum):
 class RFMApp:
     DAY_TO_HOUR : Final = 24
     HOUR_TO_MIN : Final = 60
-    PC_INPUT_MAX : Final = 99
-    ARDUINO_WRITE_MAX : Final = 4095
     
-    def __init__(self, master, port):
+    def __init__(self, master, port, pc_input_max, arduino_read_max):
         self.master = master
+        self.pc_input_max = pc_input_max
+        self.arduino_read_max = arduino_read_max
         self.setup_initial_state()
         self.setup_ui()
         self.setup_schedular()
@@ -381,8 +381,8 @@ class RFMApp:
         aaaapbbbb = aaaabbpbb / 100
         aaaa = int(aaaapbbbb)
         bbbb = int((aaaapbbbb - aaaa) * 1e4)
-        flow_L = (float(aaaa) * (self.PC_INPUT_MAX/10) / self.ARDUINO_WRITE_MAX)
-        flow_R = (float(bbbb) * (self.PC_INPUT_MAX/10) / self.ARDUINO_WRITE_MAX)
+        flow_L = (float(aaaa) * (self.pc_input_max/10) / self.arduino_read_max)
+        flow_R = (float(bbbb) * (self.pc_input_max/10) / self.arduino_read_max)
         return [flow_L, flow_R]
 
     def displayFlowValues(self, flowValues):
@@ -406,7 +406,7 @@ class RFMApp:
             flow_setpoint = int(flow_setpoint_entry)
         except:
             return False
-        return 0 <= flow_setpoint <= self.PC_INPUT_MAX
+        return 0 <= flow_setpoint <= self.pc_input_max
     
     def update_flow_setpoint(self, index):
         if self.channels[index] == Channel.CH_UNKNOWN:
@@ -561,11 +561,14 @@ def open_config_file(file_path: str):
         config_data = json.load(file)
         arduino_port = config_data.get('arduino_port')
         localserver_port = config_data.get('localserver_port')
+        pc_input_max = config_data.get('pc_input_max')
+        arduino_read_max = config_data.get('arduino_read_max')
         
-        if not isinstance(arduino_port, str) or not isinstance(localserver_port, int): # parsing json, check error from casting
+        # parsing json, check error from casting
+        if not isinstance(arduino_port, str) or not isinstance(localserver_port, int) or not isinstance(pc_input_max, int) or not isinstance(arduino_read_max, int):
             raise ValueError("Invalid configuration data")
         
-        return arduino_port, localserver_port
+        return arduino_port, localserver_port, pc_input_max, arduino_read_max
 
 
 def resource_path(relative_path):
@@ -586,12 +589,12 @@ if __name__ == "__main__":
     config_file_path = "rfm_config.json"
     # If loading fails, create a default config.json.
     try:
-        arduino_port, localserver_port = open_config_file(config_file_path)
+        arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
     except Exception as e:
         print(e)
         with open(config_file_path, 'w') as file:
-            json.dump({'arduino_port': 'COM3', 'localserver_port': 5000}, file)
-        arduino_port, localserver_port = open_config_file(config_file_path)
+            json.dump({'arduino_port': 'COM3', 'localserver_port': 5000, 'pc_input_max':99, 'arduino_read_max':4095}, file)
+        arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
     
     # Flask 애플리케이션 설정
     app = Flask(__name__)
@@ -600,12 +603,12 @@ if __name__ == "__main__":
     def get_value():
         return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2], 'timestamp': rfmapp.last_read_time})
 
-    def run_app(port):
+    def run_app(port, pc_input_max, arduino_read_max):
         # GUI 애플리케이션 실행
         master = tk.Tk()
         master.iconbitmap(resource_path("MFC.ico"))
         global rfmapp
-        rfmapp = RFMApp(master, port)
+        rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
         rfmapp.master.mainloop()
 
     def run_flask():
@@ -617,4 +620,4 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
 
-    run_app(arduino_port)
+    run_app(arduino_port, pc_input_max, arduino_read_max)
