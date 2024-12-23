@@ -1,327 +1,180 @@
-int serialBuffer;       // serialBuffer는 시리얼 통신으로 processing에서 받는 문자열이다.
-int FlowRateBuffer = 0; // FlowRateBuffer는 flowrate 설정에서 processing에서 받는 정수열을 저장하는 변수이다.
-int value;              // value는 flowrate 설정에서 processing에서 받는 정수열(0-200)을 아두이노에서 사용하는(0-4095)로 바꾼 변수이다.
-int MeasureState = 0;
+int flowSetpointBuffer = 0;
 float MeasureBuffer = 0.000;
 
-const int FLOW_STATE_CH1 = 2;
-const int FLOW_STATE_CH2 = 7;
-const int FLOW_STATE_CH3 = 8;
-const int FLOW_STATE_CH4 = 13;
+// pc specific
+const int PC_INPUT_MAX = 200;
 
-const int FLOW_SETPOINT_CH1 = 3;
-const int FLOW_SETPOINT_CH2 = 5;
-const int FLOW_SETPOINT_CH3 = 9;
-const int FLOW_SETPOINT_CH4 = 11;
+// arduino specific
+#ifdef ARDUINO_ARCH_SAM
+const int ARDUINO_WRITE_MAX = 4095;
+#else
+const int ARDUINO_WRITE_MAX = 255;
+#endif
+#if defined(ARDUINO_ARCH_SAM) || defined(ARDUINO_SAMD_ZERO) || defined(ESP32)
+const int ARDUINO_READ_MAX = 4095; // 12비트 최대 값
+#else
+const int ARDUINO_READ_MAX = 1023; // 10비트 최대 값
+#endif
 
-const int FLOW_MEASUREMENT_CH1 = A0;
-const int FLOW_MEASUREMENT_CH2 = A1;
-const int FLOW_MEASUREMENT_CH3 = A2;
-const int FLOW_MEASUREMENT_CH4 = A3;
+const int NUM_CHANNELS = 4;
+
+// COMMAND list
+const char FLOW_STATE_COMMANDS_HIGH[NUM_CHANNELS] = {'a', 's', 'd', 'f'};
+const char FLOW_STATE_COMMANDS_LOW[NUM_CHANNELS] = {'z', 'x', 'c', 'v'};
+const char FLOW_SETPOINT_COMMANDS[NUM_CHANNELS] = {'q', 'w', 'e', 'r'};
+const char NUMBER_COMMANDS[10] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'};
+const char MEASCHPAIR_COMMANDS[24] = {'t', 'y', 'u', 'i', 'o', 'p', 'g', 'h', 'j', 'k', 'l', 'b', 'n', 'm', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P'};
+const char RESET_COMMAND = 'B';
+
+struct MeasChPair
+{
+    int firstCh;
+    int secondCh;
+};
+
+const MeasChPair measChPairMap[24] = {
+    {1, -1}, {1, 1}, {1, 2}, {1, 3}, {1, 4}, {2, -1}, {2, 1}, {2, 2}, {2, 3}, {2, 4}, {3, -1}, {3, 1}, {3, 2}, {3, 3}, {3, 4}, {4, -1}, {4, 1}, {4, 2}, {4, 3}, {4, 4}, {-1, 1}, {-1, 2}, {-1, 3}, {-1, 4}};
+
+MeasChPair currentMeasChPair = {0, 0};
+
+// pin assignment
+const int FLOW_STATE_CH[NUM_CHANNELS] = {2, 7, 8, 13};
+const int FLOW_SETPOINT_CH[NUM_CHANNELS] = {3, 5, 9, 11};
+const int FLOW_MEAS_CH[NUM_CHANNELS] = {A0, A1, A2, A3};
+
+int getIndexInArray(const char arr[], int size, int element)
+{
+    for (int i = 0; i < size; i++)
+    {
+        if (arr[i] == element)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+bool isInArray(const char arr[], int size, int element)
+{
+    return getIndexInArray(arr, size, element) != -1;
+}
+
+void updateMeasureState(char serialBuffer)
+{
+    int index = getIndexInArray(MEASCHPAIR_COMMANDS, 24, serialBuffer);
+    if (index == -1)
+        currentMeasChPair = {0, 0};
+
+    currentMeasChPair = measChPairMap[index];
+}
+
+void updateMeasureBuffer()
+{
+    int primaryChIndex = currentMeasChPair.firstCh;
+    int secondaryChIndex = currentMeasChPair.secondCh;
+
+    float primaryValue = 0.00;
+    float secondaryValue = 0.00;
+
+    if (primaryChIndex > 0)
+    {
+        primaryValue = analogRead(FLOW_MEAS_CH[primaryChIndex - 1]) * 100.00;
+    }
+    if (secondaryChIndex > 0)
+    {
+        secondaryValue = analogRead(FLOW_MEAS_CH[secondaryChIndex - 1]) / 100.00;
+    }
+
+    MeasureBuffer = primaryValue + secondaryValue;
+}
+
+void writeFlowState(char command)
+{
+    if (isInArray(FLOW_STATE_COMMANDS_HIGH, NUM_CHANNELS, command))
+    {
+        int chIndex = getIndexInArray(FLOW_STATE_COMMANDS_HIGH, NUM_CHANNELS, command);
+        digitalWrite(FLOW_STATE_CH[chIndex], HIGH);
+    }
+    if (isInArray(FLOW_STATE_COMMANDS_LOW, NUM_CHANNELS, command))
+    {
+        int chIndex = getIndexInArray(FLOW_STATE_COMMANDS_LOW, NUM_CHANNELS, command);
+        analogWrite(FLOW_STATE_CH[chIndex], LOW);
+    }
+}
+
+void writeFlowSetpointSetting(char command)
+{
+    int channelIndex = getIndexInArray(FLOW_SETPOINT_COMMANDS, NUM_CHANNELS, command);
+    if (channelIndex == -1)
+        return;
+
+    int value = map(flowSetpointBuffer, 0, PC_INPUT_MAX, 0, ARDUINO_WRITE_MAX);
+    analogWrite(FLOW_SETPOINT_CH[channelIndex], value);
+    flowSetpointBuffer = 0;
+}
+
+void pinAssignment()
+{
+    for (int i = 0; i < NUM_CHANNELS; i++)
+    {
+        pinMode(FLOW_STATE_CH[i], OUTPUT);
+        pinMode(FLOW_SETPOINT_CH[i], OUTPUT);
+        pinMode(FLOW_MEAS_CH[i], INPUT);
+    }
+}
+
+void reset()
+{
+    for (int i = 0; i < NUM_CHANNELS; i++)
+    {
+        digitalWrite(FLOW_STATE_CH[i], HIGH);
+        analogWrite(FLOW_SETPOINT_CH[i], 0);
+    }
+    currentMeasChPair = {0, 0};
+}
 
 void setup()
 {
-    // put your setup code here, to run once:
-    Serial.begin(9600); // 시리얼 통신(9600)을 개시한다.
-    // FLOW STATE, DIGITAL OUTPUT
-    pinMode(FLOW_STATE_CH1, OUTPUT); // CH1 FLOW STATE
-    pinMode(FLOW_STATE_CH2, OUTPUT); // CH2 FLOW STATE
-    pinMode(FLOW_STATE_CH3, OUTPUT); // CH3 FLOW STATE
-    pinMode(FLOW_STATE_CH4, OUTPUT); // CH4 FLOW STATE
-    // FLOW SETPOINT, ANALOG OUTPUT
-    pinMode(FLOW_SETPOINT_CH1, OUTPUT); // CH1 FLOW SETPOINT
-    pinMode(FLOW_SETPOINT_CH2, OUTPUT); // CH2 FLOW SETPOINT
-    pinMode(FLOW_SETPOINT_CH3, OUTPUT); // CH3 FLOW SETPOINT
-    pinMode(FLOW_SETPOINT_CH4, OUTPUT); // CH4 FLOW SETPOINT
-    // FLOW MEASUREMENT, ANALOG INPUT
-    pinMode(FLOW_MEASUREMENT_CH1, INPUT); // CH1 FLOW MEASUREMENT
-    pinMode(FLOW_MEASUREMENT_CH2, INPUT); // CH2 FLOW MEASUREMENT
-    pinMode(FLOW_MEASUREMENT_CH3, INPUT); // CH3 FLOW MEASUREMENT
-    pinMode(FLOW_MEASUREMENT_CH4, INPUT); // CH4 FLOW MEASUREMENT
-    // INITIAL FLOW STATE : OFF
-    digitalWrite(FLOW_STATE_CH1, HIGH);
-    digitalWrite(FLOW_STATE_CH2, HIGH);
-    digitalWrite(FLOW_STATE_CH3, HIGH);
-    digitalWrite(FLOW_STATE_CH4, HIGH);
-    // INNITIAL FLOW SETPOINT : 0.55V
-    analogWrite(FLOW_SETPOINT_CH1, 0);
-    analogWrite(FLOW_SETPOINT_CH2, 0);
-    analogWrite(FLOW_SETPOINT_CH3, 0);
-    analogWrite(FLOW_SETPOINT_CH4, 0);
+    Serial.begin(9600);
+#ifdef ARDUINO_ARCH_SAM
+    analogWriteResolution(12);
+#endif
+#if defined(ARDUINO_ARCH_SAM) || defined(ARDUINO_SAMD_ZERO) || defined(ESP32)
+    analogReadResolution(12);
+#endif
+    pinAssignment();
+    reset();
 }
 
 void loop()
 {
-    while (Serial.available()) // 시리얼 통신이 가능한 동안
+    while (Serial.available())
     {
-        serialBuffer = Serial.read(); // serialBuffer는 시리얼에서 받은 값이다.
+        char serialBuffer = Serial.read();
 
-        // ON-OFF PART (HIGH : 3.3 V (close), LOW : 0 V (open))
-        // 2, 7, 8, 13 : Ch1, Ch2, Ch3, Ch4 FLOW STATE
-        if (serialBuffer == 'a')
-            digitalWrite(2, HIGH);
-        if (serialBuffer == 'z')
-            analogWrite(2, LOW);
-        if (serialBuffer == 's')
-            digitalWrite(7, HIGH);
-        if (serialBuffer == 'x')
-            analogWrite(7, LOW);
-        if (serialBuffer == 'd')
-            digitalWrite(8, HIGH);
-        if (serialBuffer == 'c')
-            analogWrite(8, LOW);
-        if (serialBuffer == 'f')
-            digitalWrite(13, HIGH);
-        if (serialBuffer == 'v')
-            analogWrite(13, LOW);
-
-        // FLOW RATE BUFFER PART
-        if ((serialBuffer >= '0') && (serialBuffer <= '9'))
+        if (isInArray(FLOW_STATE_COMMANDS_HIGH, NUM_CHANNELS, serialBuffer) || isInArray(FLOW_STATE_COMMANDS_LOW, NUM_CHANNELS, serialBuffer))
         {
-            FlowRateBuffer = 10 * FlowRateBuffer + serialBuffer - '0';
+            writeFlowState(serialBuffer);
         }
-
-        // FLOW RATE SETTING PART
-        else if (serialBuffer == 'q')
+        else if (isInArray(NUMBER_COMMANDS, 10, serialBuffer))
         {
-            value = map(FlowRateBuffer, 0, 200, 0, 255);
-            analogWrite(3, value);
-            FlowRateBuffer = 0;
+            flowSetpointBuffer = 10 * flowSetpointBuffer + serialBuffer - '0';
         }
-        else if (serialBuffer == 'w')
+        else if (isInArray(FLOW_SETPOINT_COMMANDS, NUM_CHANNELS, serialBuffer))
         {
-            value = map(FlowRateBuffer, 0, 200, 0, 255);
-            analogWrite(5, value);
-            FlowRateBuffer = 0;
+            writeFlowSetpointSetting(serialBuffer);
         }
-        else if (serialBuffer == 'e')
+        else if (serialBuffer == RESET_COMMAND)
         {
-            value = map(FlowRateBuffer, 0, 200, 0, 255);
-            analogWrite(9, value);
-            FlowRateBuffer = 0;
+            reset();
         }
-        else if (serialBuffer == 'r')
+        else if (isInArray(MEASCHPAIR_COMMANDS, 24, serialBuffer))
         {
-            value = map(FlowRateBuffer, 0, 200, 0, 255);
-            analogWrite(11, value);
-            FlowRateBuffer = 0;
-        }
-
-        // RESET PART
-        if (serialBuffer == 'B')
-        {
-            digitalWrite(2, HIGH);
-            digitalWrite(7, HIGH);
-            digitalWrite(8, HIGH);
-            digitalWrite(13, HIGH);
-            analogWrite(3, 0);
-            analogWrite(5, 0);
-            analogWrite(9, 0);
-            analogWrite(11, 0);
-            MeasureState = 0;
-        }
-
-        // FLOW RATE MEASUREMENT PART
-        // analogRead의 범위는 0-4095이다. TODO: 믿을만한 정보는 아닌 것 같다.
-
-        if (serialBuffer == 't')
-        {
-            MeasureState = 10;
-        }
-        if (serialBuffer == 'y')
-        {
-            MeasureState = 11;
-        }
-        if (serialBuffer == 'u')
-        {
-            MeasureState = 12;
-        }
-        if (serialBuffer == 'i')
-        {
-            MeasureState = 13;
-        }
-        if (serialBuffer == 'o')
-        {
-            MeasureState = 14;
-        }
-        if (serialBuffer == 'p')
-        {
-            MeasureState = 20;
-        }
-        if (serialBuffer == 'g')
-        {
-            MeasureState = 21;
-        }
-        if (serialBuffer == 'h')
-        {
-            MeasureState = 22;
-        }
-        if (serialBuffer == 'j')
-        {
-            MeasureState = 23;
-        }
-        if (serialBuffer == 'k')
-        {
-            MeasureState = 24;
-        }
-        if (serialBuffer == 'l')
-        {
-            MeasureState = 30;
-        }
-        if (serialBuffer == 'b')
-        {
-            MeasureState = 31;
-        }
-        if (serialBuffer == 'n')
-        {
-            MeasureState = 32;
-        }
-        if (serialBuffer == 'm')
-        {
-            MeasureState = 33;
-        }
-        if (serialBuffer == 'Q')
-        {
-            MeasureState = 34;
-        }
-        if (serialBuffer == 'W')
-        {
-            MeasureState = 40;
-        }
-        if (serialBuffer == 'E')
-        {
-            MeasureState = 41;
-        }
-        if (serialBuffer == 'R')
-        {
-            MeasureState = 42;
-        }
-        if (serialBuffer == 'T')
-        {
-            MeasureState = 43;
-        }
-        if (serialBuffer == 'Y')
-        {
-            MeasureState = 44;
-        }
-        if (serialBuffer == 'U')
-        {
-            MeasureState = 1;
-        }
-        if (serialBuffer == 'I')
-        {
-            MeasureState = 2;
-        }
-        if (serialBuffer == 'O')
-        {
-            MeasureState = 3;
-        }
-        if (serialBuffer == 'P')
-        {
-            MeasureState = 4;
+            updateMeasureState(serialBuffer);
         }
     }
 
-    if (MeasureState == 10)
-    {
-        MeasureBuffer = (analogRead(A0) * 100.00);
-    }
-    if (MeasureState == 11)
-    {
-        MeasureBuffer = (analogRead(A0) * 100.00 + analogRead(A0) / 100.00);
-    }
-    if (MeasureState == 12)
-    {
-        MeasureBuffer = (analogRead(A0) * 100.00 + analogRead(A1) / 100.00);
-    }
-    if (MeasureState == 13)
-    {
-        MeasureBuffer = (analogRead(A0) * 100.00 + analogRead(A2) / 100.00);
-    }
-    if (MeasureState == 14)
-    {
-        MeasureBuffer = (analogRead(A0) * 100.00 + analogRead(A3) / 100.00);
-    }
-    if (MeasureState == 20)
-    {
-        MeasureBuffer = (analogRead(A1) * 100.00);
-    }
-    if (MeasureState == 21)
-    {
-        MeasureBuffer = (analogRead(A1) * 100.00 + analogRead(A0) / 100.00);
-    }
-    if (MeasureState == 22)
-    {
-        MeasureBuffer = (analogRead(A1) * 100.00 + analogRead(A1) / 100.00);
-    }
-    if (MeasureState == 23)
-    {
-        MeasureBuffer = (analogRead(A1) * 100.00 + analogRead(A2) / 100.00);
-    }
-    if (MeasureState == 24)
-    {
-        MeasureBuffer = (analogRead(A1) * 100.00 + analogRead(A3) / 100.00);
-    }
-    if (MeasureState == 30)
-    {
-        MeasureBuffer = (analogRead(A2) * 100.00);
-    }
-    if (MeasureState == 31)
-    {
-        MeasureBuffer = (analogRead(A2) * 100.00 + analogRead(A0) / 100.00);
-    }
-    if (MeasureState == 32)
-    {
-        MeasureBuffer = (analogRead(A2) * 100.00 + analogRead(A1) / 100.00);
-    }
-    if (MeasureState == 33)
-    {
-        MeasureBuffer = (analogRead(A2) * 100.00 + analogRead(A2) / 100.00);
-    }
-    if (MeasureState == 34)
-    {
-        MeasureBuffer = (analogRead(A2) * 100.00 + analogRead(A3) / 100.00);
-    }
-    if (MeasureState == 40)
-    {
-        MeasureBuffer = (analogRead(A3) * 100.00);
-    }
-    if (MeasureState == 41)
-    {
-        MeasureBuffer = (analogRead(A3) * 100.00 + analogRead(A0) / 100.00);
-    }
-    if (MeasureState == 42)
-    {
-        MeasureBuffer = (analogRead(A3) * 100.00 + analogRead(A1) / 100.00);
-    }
-    if (MeasureState == 43)
-    {
-        MeasureBuffer = (analogRead(A3) * 100.00 + analogRead(A2) / 100.00);
-    }
-    if (MeasureState == 44)
-    {
-        MeasureBuffer = (analogRead(A3) * 100.00 + analogRead(A3) / 100.00);
-    }
-    if (MeasureState == 1)
-    {
-        MeasureBuffer = (analogRead(A0) / 100.00);
-    }
-    if (MeasureState == 2)
-    {
-        MeasureBuffer = (analogRead(A1) / 100.00);
-    }
-    if (MeasureState == 3)
-    {
-        MeasureBuffer = (analogRead(A2) / 100.00);
-    }
-    if (MeasureState == 4)
-    {
-        MeasureBuffer = (analogRead(A3) / 100.00);
-    }
-    if (MeasureState == 0)
-    {
-        MeasureBuffer = 0.00;
-    }
+    updateMeasureBuffer();
     Serial.println(MeasureBuffer);
     delay(10);
 }
