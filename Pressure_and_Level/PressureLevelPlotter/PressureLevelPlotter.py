@@ -29,7 +29,7 @@ class PressureLevelPlotter:
         self.create_widgets()
 
         # Deques for storing values
-        self.arduino_deque = VariousTimeDeque(3) # 0: P_st, 1: P_pl, 2: V_pl
+        self.arduino_deque = VariousTimeDeque(4) # 0: P_st, 1: P_pl, 2: V_pl, 3: P_pr
 
         self.time_arduino_plot = self.arduino_deque.get_time_deque(1)
         self.data_arduino_plot = self.arduino_deque.get_data_deque(1)
@@ -84,6 +84,7 @@ class PressureLevelPlotter:
         self.plant_volume_label = self.create_value_labels("• V_plant", "L", self.data_frame, 0)
         self.plant_pressure_label = self.create_value_labels("• P_plant", "psi", self.data_frame, 1)
         self.storage_pressure_label = self.create_value_labels("• P_storage", "psi", self.data_frame, 2)
+        self.purifier_pressure_label = self.create_value_labels("• P_purifier", "psi", self.data_frame, 3)
 
         # Status frame
         self.status_frame = tk.Frame(self.right_frame)
@@ -200,22 +201,22 @@ class PressureLevelPlotter:
         # Fetch data from Arduino local server daemon
         if self.enable_arduino.get() == 0:
             self.arduino_status_code = 'Off'
-            return [0, 0, 0]
+            return [0, 0, 0, 0]
         try:
             response = requests.get("http://127.0.0.1:5003/Meas", timeout=1)
             self.arduino_status_code = response.status_code
             if response.status_code != 200:
                 print(f"Error fetching from Arduino: {response.status_code}")
-                return [0, 0, 0]
+                return [0, 0, 0, 0]
             
             json = response.json()
             
             if time.time() - json['timestamp'] > 5:
                 self.arduino_status_code = 'DataTooOld'
                 print("Data is too old")
-                return [0, 0]
+                return [0, 0, 0, 0]
             
-            list_of_str = [json['P_st'], json['P_pl'], json['V_pl']]
+            list_of_str = [json['P_st'], json['P_pl'], json['V_pl'], '0']
             return [float(x.split(' ')[0]) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.arduino_status_code = 'ConnectionError'
@@ -232,7 +233,7 @@ class PressureLevelPlotter:
         except Exception as e:
             self.arduino_status_code = 'Critical'
             print(f"Critical error fetching from Storage: {e}")
-        return [0, 0, 0]
+        return [0, 0, 0, 0]
 
     def fetch_data(self):
         values_arduino = self.get_data_from_arduino()
@@ -261,6 +262,7 @@ class PressureLevelPlotter:
         self.plant_volume_label.config(text=f": {self.arduino_deque.get_last_data()[2]:.2f} L")
         self.plant_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[1]:.2f} psi")
         self.storage_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[0]:.2f} psi")
+        self.purifier_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[3]:.2f} psi")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.arduino_status_label.config(text=f"{': Connected' if self.arduino_status_code == 200 else self.make_error_sentence(self.arduino_status_code)}")
     
@@ -277,6 +279,7 @@ class PressureLevelPlotter:
         
         self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
         self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
+        self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[3], marker='o', color='skyblue', label="P_purifier", markersize=marker_size)
         
         ax2_color = 'red'
         
@@ -295,7 +298,7 @@ class PressureLevelPlotter:
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
-        max_pressure = max(10, max(self.data_arduino_plot[1]), max(self.data_arduino_plot[0]))
+        max_pressure = max(10, max(self.data_arduino_plot[1]), max(self.data_arduino_plot[0]), max(self.data_arduino_plot[3]))
         if self.enable_localmaxmin.get() == 1:
             self.draw_local_maxmin(self.ax2, max_pressure)
 
@@ -432,7 +435,7 @@ class PressureLevelPlotter:
         
         # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} V, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} V, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
 
 
 def resource_path(relative_path):
