@@ -216,7 +216,7 @@ class PressureLevelPlotter:
                 print("Data is too old")
                 return [0, 0, 0, 0]
             
-            list_of_str = [json['P_st'], json['P_pl'], json['V_pl'], '0']
+            list_of_str = [json['P_st'], json['P_pl'], json['V_pl'], json['P_pur']]
             return [float(x.split(' ')[0]) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.arduino_status_code = 'ConnectionError'
