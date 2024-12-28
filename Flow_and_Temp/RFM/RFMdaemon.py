@@ -14,7 +14,7 @@ from schedularwindow import Action, SchedularWindow, ScheduleWidget
 SERIAL_ON = False
 
 # graphic constants
-COLUMNNUM = 3
+COLUMNNUM = 4
 COLUMNWIDTH = 235
 HEIGHT = 385
 FONT_SIZE = 15
@@ -43,19 +43,20 @@ COLOR_HIGHLIGHTED = "gray"
 
 # highlighed entry enum
 ENTRY_HIGHLIGHTED_NONE = 0
-ENTRY_HIGHLIGHTED_FLOWSET_L = 1
-ENTRY_HIGHLIGHTED_FLOWSET_M = 2
-ENTRY_HIGHLIGHTED_FLOWSET_R = 3
-ENTRY_HIGHLIGHTED_CH_L = 4
-ENTRY_HIGHLIGHTED_CH_M = 5
-ENTRY_HIGHLIGHTED_CH_R = 6
+ENTRY_HIGHLIGHTED_FLOWSET_TIP = 1
+ENTRY_HIGHLIGHTED_FLOWSET_SHIELD = 2
+ENTRY_HIGHLIGHTED_FLOWSET_BYPASS = 3
+ENTRY_HIGHLIGHTED_FLOWSET_PUMPING = 4
+ENTRY_HIGHLIGHTED_CH_TIP = 5
+ENTRY_HIGHLIGHTED_CH_SHIELD = 6
+ENTRY_HIGHLIGHTED_CH_BYPASS = 7
+ENTRY_HIGHLIGHTED_CH_PUMPING = 8
 
 # toggleStates constant
 class ToggleState(Enum):
     On = 1
     Off = 2
     SelectChannel = 3
-
 
 
 class RFMApp:
@@ -165,22 +166,24 @@ class RFMApp:
     def read_flow_values(self):
         flow_values = [0] * COLUMNNUM
         
-        self.serial.setReadingChannel_serial(self.channels)
-
-        serial_buffer = self.serial.readline_serial()
-        if serial_buffer:
-            temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
-            flow_values[0] = temp_flow_values[0]
-            flow_values[1] = temp_flow_values[1]
-        
-
-        tempChannels = [Channel.CH_UNKNOWN, self.channels[2]]
-        if self.channels[2] != Channel.CH_UNKNOWN:
+        tempChannels = [self.channels[0], self.channels[1]]
+        if self.channels[0] != Channel.CH_UNKNOWN or self.channels[1] != Channel.CH_UNKNOWN:
             self.serial.setReadingChannel_serial(tempChannels)
             serial_buffer = self.serial.readline_serial()
             if serial_buffer:
                 temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
-                flow_values[2] = temp_flow_values[1]
+                flow_values[0] = temp_flow_values[0]
+                flow_values[1] = temp_flow_values[1]
+        
+
+        tempChannels = [self.channels[2], self.channels[3]]
+        if self.channels[2] != Channel.CH_UNKNOWN or self.channels[3] != Channel.CH_UNKNOWN:
+            self.serial.setReadingChannel_serial(tempChannels)
+            serial_buffer = self.serial.readline_serial()
+            if serial_buffer:
+                temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
+                flow_values[2] = temp_flow_values[0]
+                flow_values[3] = temp_flow_values[1]
 
         self.last_read_time = time.time()
 
@@ -283,6 +286,7 @@ class RFMApp:
             
             self.flowSetPoints_Shown[switch_index] = "paused"
             self.flowSetPoint_Entry[switch_index] = ""
+            self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
             self.serial.writeChannelOff_serial(self.channels[switch_index])
         else:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
@@ -331,9 +335,9 @@ class RFMApp:
                 self.canvas.create_rectangle(x1, y1, x2, y2, fill=self.channelBkgColors[i], outline="")
 
     def displayTexts(self):
-        COLUMNNAME = [ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Bypass.value]
+        COLUMNNAME = [ChannelName.Tip.value, ChannelName.Shield.value, ChannelName.Bypass.value, ChannelName.Pumping.value]
         if not self.mn:
-            line = '.' * 100
+            line = '.' * 300
             
             resize_ratio_x = self.width / (COLUMNNUM * COLUMNWIDTH)
             resize_ratio_y = self.height / HEIGHT
@@ -443,35 +447,25 @@ class RFMApp:
         return highlighted_entry
 
     def key_pressed(self, event):
+        entry_flowset_list = [ENTRY_HIGHLIGHTED_FLOWSET_TIP, ENTRY_HIGHLIGHTED_FLOWSET_SHIELD, ENTRY_HIGHLIGHTED_FLOWSET_BYPASS, ENTRY_HIGHLIGHTED_FLOWSET_PUMPING]
+        entry_channel_list = [ENTRY_HIGHLIGHTED_CH_TIP, ENTRY_HIGHLIGHTED_CH_SHIELD, ENTRY_HIGHLIGHTED_CH_BYPASS, ENTRY_HIGHLIGHTED_CH_PUMPING]
         if self.is_key_code_change_highlight_entry(event.keysym):
             highlight_entry = self.get_highlight_entry_using_keycode(event.keysym, self.highlighted_entry)
             self.change_highlight_entry_to(highlight_entry)
         elif event.keysym == 'Return' or event.keysym == 'Enter':
-            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStates[0] == ToggleState.On:
-                self.update_flow_setpoint(0)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStates[1] == ToggleState.On:
-                self.update_flow_setpoint(1)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStates[2] == ToggleState.On:
-                self.update_flow_setpoint(2)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStates[0] == ToggleState.Off:
-                self.apply_changed_channel(0)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStates[1] == ToggleState.Off:
-                self.apply_changed_channel(1)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStates[2] == ToggleState.Off:
-                self.apply_changed_channel(2)
+            for i, entry_flowset in enumerate(entry_flowset_list):
+                if self.highlighted_entry == entry_flowset and self.toggleStates[i] == ToggleState.On:
+                    self.update_flow_setpoint(i)
+            for i, entry_channel in enumerate(entry_channel_list):
+                if self.highlighted_entry == entry_channel and self.toggleStates[i] == ToggleState.Off:
+                    self.apply_changed_channel(i)
         else:
-            if self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_L and self.toggleStates[0] == ToggleState.On:
-                self.flowSetPoint_Entry[0] = self.modify_number_string_by_key(self.flowSetPoint_Entry[0], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_M and self.toggleStates[1] == ToggleState.On:
-                self.flowSetPoint_Entry[1] = self.modify_number_string_by_key(self.flowSetPoint_Entry[1], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_FLOWSET_R and self.toggleStates[2] == ToggleState.On:
-                self.flowSetPoint_Entry[2] = self.modify_number_string_by_key(self.flowSetPoint_Entry[2], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_L and self.toggleStates[0] == ToggleState.Off:
-                self.channelsEntry[0] = self.modify_number_string_by_key(self.channelsEntry[0], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_M and self.toggleStates[1] == ToggleState.Off:
-                self.channelsEntry[1] = self.modify_number_string_by_key(self.channelsEntry[1], event.keysym, event.char)
-            elif self.highlighted_entry == ENTRY_HIGHLIGHTED_CH_R and self.toggleStates[2] == ToggleState.Off:
-                self.channelsEntry[2] = self.modify_number_string_by_key(self.channelsEntry[2], event.keysym, event.char)
+            for i, entry_flowset in enumerate(entry_flowset_list):
+                if self.highlighted_entry == entry_flowset and self.toggleStates[i] == ToggleState.On:
+                    self.flowSetPoint_Entry[i] = self.modify_number_string_by_key(self.flowSetPoint_Entry[i], event.keysym, event.char)
+            for i, entry_channel in enumerate(entry_channel_list):
+                if self.highlighted_entry == entry_channel and self.toggleStates[i] == ToggleState.Off:
+                    self.channelsEntry[i] = self.modify_number_string_by_key(self.channelsEntry[i], event.keysym, event.char)
 
     def modify_number_string_by_key(self, number_string, key_code, key):
         if key_code == 'BackSpace' and len(number_string) > 0:
@@ -514,42 +508,22 @@ class RFMApp:
 
     def change_highlight_entry_to(self, entry):
         self.highlighted_entry = entry
+        entry_flowset_list = [ENTRY_HIGHLIGHTED_FLOWSET_TIP, ENTRY_HIGHLIGHTED_FLOWSET_SHIELD, ENTRY_HIGHLIGHTED_FLOWSET_BYPASS, ENTRY_HIGHLIGHTED_FLOWSET_PUMPING]
+        entry_channel_list = [ENTRY_HIGHLIGHTED_CH_TIP, ENTRY_HIGHLIGHTED_CH_SHIELD, ENTRY_HIGHLIGHTED_CH_BYPASS, ENTRY_HIGHLIGHTED_CH_PUMPING]
         
-        if entry == ENTRY_HIGHLIGHTED_FLOWSET_L:
-            self.flowSetPointBkgColors[0] = COLOR_HIGHLIGHTED
-        else:
-            self.flowSetPointBkgColors[0] = COLOR_BLACK
-            self.flowSetPoint_Entry[0] = ""
+        for i, entry_flowset in enumerate(entry_flowset_list):
+            if entry == entry_flowset:
+                self.flowSetPointBkgColors[i] = COLOR_HIGHLIGHTED
+            else:
+                self.flowSetPointBkgColors[i] = COLOR_BLACK
+                self.flowSetPoint_Entry[i] = ""
         
-        if entry == ENTRY_HIGHLIGHTED_FLOWSET_M:
-            self.flowSetPointBkgColors[1] = COLOR_HIGHLIGHTED
-        else:
-            self.flowSetPointBkgColors[1] = COLOR_BLACK
-            self.flowSetPoint_Entry[1] = ""
-        
-        if entry == ENTRY_HIGHLIGHTED_FLOWSET_R:
-            self.flowSetPointBkgColors[2] = COLOR_HIGHLIGHTED
-        else:
-            self.flowSetPointBkgColors[2] = COLOR_BLACK
-            self.flowSetPoint_Entry[2] = ""
-        
-        if entry == ENTRY_HIGHLIGHTED_CH_L:
-            self.channelBkgColors[0] = COLOR_HIGHLIGHTED
-        else:
-            self.channelBkgColors[0] = COLOR_BLACK
-            self.channelsEntry[0] = ""
-        
-        if entry == ENTRY_HIGHLIGHTED_CH_M:
-            self.channelBkgColors[1] = COLOR_HIGHLIGHTED
-        else:
-            self.channelBkgColors[1] = COLOR_BLACK
-            self.channelsEntry[1] = ""
-        
-        if entry == ENTRY_HIGHLIGHTED_CH_R:
-            self.channelBkgColors[2] = COLOR_HIGHLIGHTED
-        else:
-            self.channelBkgColors[2] = COLOR_BLACK
-            self.channelsEntry[2] = ""
+        for i, entry_channel in enumerate(entry_channel_list):
+            if entry == entry_channel:
+                self.channelBkgColors[i] = COLOR_HIGHLIGHTED
+            else:
+                self.channelBkgColors[i] = COLOR_BLACK
+                self.channelsEntry[i] = ""
 
 
 def open_config_file(file_path: str):
