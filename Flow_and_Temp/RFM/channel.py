@@ -22,6 +22,7 @@ class ChannelName(enum.Enum):
     Tip = "Tip"
     Shield = "Shield"
     Bypass = "Bypass"
+    Pumping  = "Pumping"
     
     def get_column(self):
         if self == ChannelName.Tip:
@@ -30,4 +31,6 @@ class ChannelName(enum.Enum):
             return 1
         if self == ChannelName.Bypass:
             return 2
+        if self == ChannelName.Pumping:
+            return 3
         return -1
