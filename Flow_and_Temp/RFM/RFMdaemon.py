@@ -11,7 +11,7 @@ from RFMserial import RFMserial
 from channel import Channel, ChannelName, convert_int_to_channel
 from schedularwindow import Action, SchedularWindow, ScheduleWidget
 
-SERIAL_ON = True
+SERIAL_ON = False
 
 # graphic constants
 COLUMNNUM = 3

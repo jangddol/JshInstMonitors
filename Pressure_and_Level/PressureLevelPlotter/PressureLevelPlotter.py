@@ -435,7 +435,7 @@ class PressureLevelPlotter:
         
         # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} V, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} L, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
 
 
 def resource_path(relative_path):
