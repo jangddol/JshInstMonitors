@@ -322,9 +322,10 @@ class PressureLevelPlotter:
         window_size = 2 * width + 1
 
         # data smoothing
+        data_notdeque = list(data)
         data_smooth = [
-            sum(data[max(i - width, 0):min(i + width + 1, len(data))]) / (min(i + width + 1, len(data)) - max(i - width, 0))
-            for i in range(len(data))
+            sum(data_notdeque[max(i - width, 0):min(i + width + 1, len(data_notdeque))]) / (min(i + width + 1, len(data_notdeque)) - max(i - width, 0))
+            for i in range(len(data_notdeque))
         ]
 
         # find peaks
