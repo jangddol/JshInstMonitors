@@ -1,18 +1,20 @@
-float P_st_filtered = NAN;
-float V_pl_filtered = NAN;
-float P_pl_filtered = NAN;
-float beta1 = 0.9875; // np.exp(-2*np.pi*1ms/500ms)
+float beta = 0.9875; // np.exp(-2*np.pi*1ms/500ms)
 int time_index = 0;
+const int period = 500;
+
+const int PIN_NUM = 3;
+const int assigned_pins[PIN_NUM] = {A0, A8, A15};
+float filtered_values[PIN_NUM] = {NAN, NAN, NAN};
 
 void setup()
 {
-  // Initialize serial communication
-  Serial.begin(9600);
+  const int baud_rate = 9600;
+  Serial.begin(baud_rate);
 
-  // Pin Setting
-  pinMode(A0, INPUT);
-  pinMode(A8, INPUT);
-  pinMode(A15, INPUT);
+  for (int i = 0; i < PIN_NUM; i++)
+  {
+    pinMode(assigned_pins[i], INPUT);
+  }
 }
 
 float low_pass_filter(float value, float last_filtered_value, float beta)
@@ -31,24 +33,27 @@ float low_pass_filter(float value, float last_filtered_value, float beta)
 
 void loop()
 {
-  int P_st_bit = analogRead(A0);
-  int P_pl_bit = analogRead(A8);
-  int V_pl_bit = analogRead(A15);
-  float P_st_float = static_cast<float>(P_st_bit);
-  float P_pl_float = static_cast<float>(P_pl_bit);
-  float V_pl_float = static_cast<float>(V_pl_bit);
-  P_st_filtered = low_pass_filter(P_st_float, P_st_filtered, beta1);
-  P_pl_filtered = low_pass_filter(P_pl_float, P_pl_filtered, beta1);
-  V_pl_filtered = low_pass_filter(V_pl_float, V_pl_filtered, beta1);
+  int values_bit[PIN_NUM];
+  float values_float[PIN_NUM];
+  for (int i = 0; i < PIN_NUM; i++)
+  {
+    values_bit[i] = analogRead(assigned_pins[i]);
+    values_float[i] = static_cast<float>(values_bit[i]);
+    filtered_values[i] = low_pass_filter(values_float[i], filtered_values[i], beta);
+  }
 
-  if (time_index == 499)
+  if (time_index == period - 1)
   {
     time_index = 0;
-    Serial.print(P_st_filtered);
-    Serial.print(",");
-    Serial.print(P_pl_filtered);
-    Serial.print(",");
-    Serial.println(V_pl_filtered);
+    for (int i = 0; i < PIN_NUM; i++)
+    {
+      Serial.print(filtered_values[i]);
+      if (i < PIN_NUM - 1)
+      {
+        Serial.print(",");
+      }
+    }
+    Serial.println();
   }
   delay(1);
   time_index++;
