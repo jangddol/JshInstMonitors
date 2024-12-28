@@ -2,9 +2,9 @@ float beta = 0.9875; // np.exp(-2*np.pi*1ms/500ms)
 int time_index = 0;
 const int period = 500;
 
-const int PIN_NUM = 3;
-const int assigned_pins[PIN_NUM] = {A0, A8, A15};
-float filtered_values[PIN_NUM] = {NAN, NAN, NAN};
+const int PIN_NUM = 4;
+const int assigned_pins[PIN_NUM] = {A0, A8, A15, A1};
+float filtered_values[PIN_NUM] = {NAN, NAN, NAN, NAN};
 
 void setup()
 {
