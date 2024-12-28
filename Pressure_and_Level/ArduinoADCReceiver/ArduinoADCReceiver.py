@@ -5,6 +5,7 @@ import time
 storage_pressure = None
 plant_pressure = None
 plant_volume = None
+purifier_pressure = None
 last_read_time = time.time()
 
 def open_serials():
@@ -22,6 +23,11 @@ def cal_pressure_plant(plant_pressure_bit):
     plant_pressure_bit = float(plant_pressure_bit)
     plant_pressure = 0.01865 * plant_pressure_bit - 3.40120
     return plant_pressure
+
+def cal_pressure_purifier(purifier_pressure_bit):
+    purifier_pressure_bit = float(purifier_pressure_bit)
+    purifier_pressure = 0.06104 * purifier_pressure_bit - 5.82056
+    return purifier_pressure
 
 def level_to_volume(x):
     x2 = x * x
@@ -48,11 +54,12 @@ def serial_mediator():
     while True:
         try:
             if Arduino.in_waiting:
-                P_st_bit, P_pl_bit, V_pl_bit = Arduino.readline().decode().strip().split(',')
-                print(f"P_st bit: {P_st_bit}, P_pl_bit: {P_pl_bit}, V_pl bit: {V_pl_bit}")
+                P_st_bit, P_pl_bit, V_pl_bit, P_pur_bit = Arduino.readline().decode().strip().split(',')
+                print(f"P_st bit: {P_st_bit}, P_pl_bit: {P_pl_bit}, V_pl bit: {V_pl_bit}, P_pur bit: {P_pur_bit}")
                 global storage_pressure
                 global plant_pressure
                 global plant_volume
+                global purifier_pressure
                 global last_read_time
                 if storage_pressure is None:
                     storage_pressure = cal_pressure_storage(P_st_bit)
@@ -66,6 +73,10 @@ def serial_mediator():
                     plant_volume = cal_volume_plant(V_pl_bit)
                 else:
                     plant_volume = (1-BETA) * cal_volume_plant(V_pl_bit) + BETA * plant_volume
+                if purifier_pressure is None:
+                    purifier_pressure = cal_pressure_purifier(P_pur_bit)
+                else:
+                    purifier_pressure = (1-BETA) * cal_pressure_purifier(P_pur_bit) + BETA * purifier_pressure
                 last_read_time = time.time()
             time.sleep(0.1)
         except Exception as e:
@@ -88,11 +99,13 @@ if __name__ == "__main__":
         global storage_pressure
         global plant_pressure
         global plant_volume
+        global purifier_pressure
         global last_read_time
         P_st_string = 'None' if storage_pressure is None else f"{storage_pressure:.3f}"
         P_pl_string = 'None' if plant_pressure is None else f"{plant_pressure:.3f}"
         V_pl_string = 'None' if plant_volume is None else f"{plant_volume:.3f}"
-        return jsonify({'P_st': P_st_string, 'P_pl': P_pl_string, 'V_pl': V_pl_string, 'timestamp': last_read_time})
+        P_pur_string = 'None' if purifier_pressure is None else f"{purifier_pressure:.3f}"
+        return jsonify({'P_st': P_st_string, 'P_pl': P_pl_string, 'V_pl': V_pl_string, 'P_pur':P_pur_string, 'timestamp': last_read_time})
 
     def run_flask():
         app.run(host='0.0.0.0', port=5003, use_reloader=False)
