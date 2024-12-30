@@ -33,7 +33,7 @@ class FlowTempPlotter:
         self.create_widgets()
 
         # Deques for storing values
-        self.rfm_deque = VariousTimeDeque(3)
+        self.rfm_deque = VariousTimeDeque(4)
         self.drc91c_deque = VariousTimeDeque(2)
 
         self.time_rfm_plot = self.rfm_deque.get_time_deque(1)
@@ -92,8 +92,9 @@ class FlowTempPlotter:
         self.tip_data_label = self.create_value_labels("• Tip", "L/min", self.data_frame, 0)
         self.shield_data_label = self.create_value_labels("• Shield", "L/min", self.data_frame, 1)
         self.bypass_data_label = self.create_value_labels("• Bypass", "L/min", self.data_frame, 2)
-        self.head_data_label = self.create_value_labels("• Head", "K", self.data_frame, 3)
-        self.cold_tip_data_label = self.create_value_labels("• Cold Tip", "K", self.data_frame, 4)
+        self.pumping_data_label = self.create_value_labels("• Pumping", "L/min", self.data_frame, 3)
+        self.head_data_label = self.create_value_labels("• Head", "K", self.data_frame, 4)
+        self.cold_tip_data_label = self.create_value_labels("• Cold Tip", "K", self.data_frame, 5)
 
         # Status frame
         self.status_frame = tk.Frame(self.right_frame)
@@ -216,22 +217,22 @@ class FlowTempPlotter:
         # Fetch data from RFM local server daemon
         if self.enable_rfm.get() == 0:
             self.rfm_status_code = 'Off'
-            return [0, 0, 0]
+            return [0, 0, 0, 0]
         try:
             response = requests.get(f"http://127.0.0.1:{self.rfm_localserver_port}/get_value", timeout=1)
             self.rfm_status_code = response.status_code
             if response.status_code != 200:
                 print(f"Error fetching from RFM: {response.status_code}")
-                return [0, 0, 0]
+                return [0, 0, 0, 0]
             
             json = response.json()
             
             if time.time() - json['timestamp'] > 5:
                 self.rfm_status_code = 'DataTooOld'
                 print("Data is too old")
-                return [0, 0, 0]
+                return [0, 0, 0, 0]
             
-            list_of_str = [json['Tip'], json['Shield'], json['Bypass']]
+            list_of_str = [json['Tip'], json['Shield'], json['Bypass'], json['Pumping']]
             return [float(x) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
             self.rfm_status_code = 'ConnectionError'
@@ -248,7 +249,7 @@ class FlowTempPlotter:
         except Exception as e:
             self.rfm_status_code = 'Critical'
             print(f"Critical error fetching from RFM: {e}")
-        return [0, 0, 0]
+        return [0, 0, 0, 0]
 
     def get_data_from_drc91c(self):
         # Fetch data from DRC91C local server daemon
@@ -318,6 +319,7 @@ class FlowTempPlotter:
         self.tip_data_label.config(text=f": {self.rfm_deque.get_last_data()[0]:.2f} L/min")
         self.shield_data_label.config(text=f": {self.rfm_deque.get_last_data()[1]:.2f} L/min")
         self.bypass_data_label.config(text=f": {self.rfm_deque.get_last_data()[2]:.2f} L/min")
+        self.pumping_data_label.config(text=f": {self.rfm_deque.get_last_data()[3]:.2f} L/min")
         self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
         self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[1]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
@@ -336,6 +338,7 @@ class FlowTempPlotter:
         self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[0], marker='o', color='green', label="Tip", markersize=marker_size)
         self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[1], marker='o', color='blue', label="Shield", markersize=marker_size)
         self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[2], marker='o', color='purple', label="Bypass", markersize=marker_size)
+        self.ax.plot(self.time_rfm_plot, self.data_rfm_plot[3], marker='o', color='skyblue', label="Pumping", markersize=marker_size)
         
         self.ax2.plot(self.time_drc91c_plot, self.data_drc91c_plot[0], marker='o', color='red', label="Head", markersize=marker_size)
         self.ax2.plot(self.time_drc91c_plot, self.data_drc91c_plot[1], marker='o', color='orange', label="Cold Tip", markersize=marker_size)

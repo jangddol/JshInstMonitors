@@ -575,7 +575,7 @@ if __name__ == "__main__":
 
     @app.route('/get_value', methods=['GET'])
     def get_value():
-        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2], 'timestamp': rfmapp.last_read_time})
+        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2], 'Pumping': rfmapp.last_flow_values[3], 'timestamp': rfmapp.last_read_time})
 
     def run_app(port, pc_input_max, arduino_read_max):
         # GUI 애플리케이션 실행
