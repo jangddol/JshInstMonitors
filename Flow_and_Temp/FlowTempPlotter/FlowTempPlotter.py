@@ -22,7 +22,7 @@ MAXLEN = 100
 class FlowTempPlotter:
     def __init__(self, master, _rfm_localserver_port, _drc91c_localserver_port):
         self.master = master
-        self.master.title("Total Plotter")
+        self.master.title("Flow & Temperature Plotter")
         self.master.bind("<Configure>", self.on_resize)
         self.width = 800  # Default width
         
