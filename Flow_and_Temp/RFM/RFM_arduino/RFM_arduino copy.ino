@@ -1,5 +1,5 @@
 int flowSetpointBuffer = 0;
-char MeasureBuffer[19];
+char MeasureBuffer[17];
 
 // pc specific
 const int PC_INPUT_MAX = 200;
@@ -7,17 +7,13 @@ const int PC_INPUT_MAX = 200;
 // arduino specific
 #ifdef ARDUINO_ARCH_SAM
 const int ARDUINO_WRITE_MAX = 4095;
-const int ARDUINO_WRITE_12BIT = 1;
 #else
 const int ARDUINO_WRITE_MAX = 255;
-const int ARDUINO_WRITE_12BIT = 0;
 #endif
 #if defined(ARDUINO_ARCH_SAM) || defined(ARDUINO_SAMD_ZERO) || defined(ESP32)
 const int ARDUINO_READ_MAX = 4095; // 12비트 최대 값
-const int ARDUINO_READ_12BIT = 1;
 #else
 const int ARDUINO_READ_MAX = 1023; // 10비트 최대 값
-const int ARDUINO_READ_12BIT = 0;
 #endif
 
 const int NUM_CHANNELS = 4;
@@ -36,8 +32,8 @@ const int FLOW_MEAS_CH[NUM_CHANNELS] = {A0, A1, A2, A3};
 
 void resetMeasureBuffer()
 {
-    memset(MeasureBuffer, '0', 18); // MeasureBuffer의 처음 16바이트를 '0'으로 설정
-    MeasureBuffer[18] = '\0';       // null 종료 문자 추가
+    memset(MeasureBuffer, '0', 16); // MeasureBuffer의 처음 16바이트를 '0'으로 설정
+    MeasureBuffer[16] = '\0';       // null 종료 문자 추가
 }
 
 int getIndexInArray(const char arr[], int size, int element)
@@ -61,7 +57,7 @@ bool isInArray(const char arr[], int size, int element)
 void formatNumbersTo16Chars(int *values, char *result)
 {
     // 각 정수를 4자리로 포맷하여 result에 저장
-    snprintf(result, 19, "%04d%04d%04d%04d%01d%01d", values[0], values[1], values[2], values[3], ARDUINO_WRITE_12BIT, ARDUINO_READ_12BIT);
+    snprintf(result, 16, "%04d%04d%04d%04d", values[0], values[1], values[2], values[3]);
 }
 
 void updateMeasureBuffer()
