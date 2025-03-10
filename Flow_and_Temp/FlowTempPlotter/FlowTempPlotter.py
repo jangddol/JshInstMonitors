@@ -169,13 +169,14 @@ class FlowTempPlotter:
         if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
-            if self.rfm_status_code != 200:
+            GOOD_STATUS = 200
+            if self.rfm_status_code != GOOD_STATUS and self.enable_rfm.get():
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} MKS247C is disconnected."
                 contents = f"Plz check the MKS247C. MKS247C is disconnected at {date_str}."
                 send_mail(subject, contents)
-            if self.drc91c_status_code != 200:
+            if self.drc91c_status_code != GOOD_STATUS and self.enable_drc91c.get():
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Temperature controller is disconnected."

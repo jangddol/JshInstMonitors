@@ -45,15 +45,12 @@ def send_mail(subject, content):
         date_str = now.strftime("%Y-%m-%d %H:%M:%S")
         SUBJECT = f"{date_str} Plant is disconnected."
 
-        # 이메일 내용
-        contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
-
         # 이메일 생성
         msg = MIMEMultipart()
-        msg['Subject'] = SUBJECT
+        msg['Subject'] = subject
         msg['From'] = SENDER
         msg['To'] = ','.join(RECIPIENT)
-        msg.attach(MIMEText(contents))
+        msg.attach(MIMEText(content))
     except:
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with open('log.txt', 'a') as file:
