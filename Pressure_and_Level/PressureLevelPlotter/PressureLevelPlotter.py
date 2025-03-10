@@ -1,15 +1,15 @@
 from datetime import datetime
-import matplotlib.dates as mdates
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import os
 import sys
-import requests
 import threading
 import time
 import tkinter as tk
 from tkinter import ttk
+import requests
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+from matplotlib import ticker
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from CustomDateLocator import CustomDateLocator
 from VariousTimeDeque import VariousTimeDeque
@@ -24,7 +24,7 @@ class PressureLevelPlotter:
         self.master.title("Pressure & Level Plotter")
         self.master.bind("<Configure>", self.on_resize)
         self.width = 800  # Default width
-        
+
         # Create UI components
         self.create_widgets()
 
@@ -35,10 +35,10 @@ class PressureLevelPlotter:
         self.data_arduino_plot = self.arduino_deque.get_data_deque(1)
 
         self.arduino_status_code = "Off"
-        
+
         self.update_interval(None)
         self.main_loop()
-        
+
     def create_widgets(self):
         # Top frame
         self.top_frame = tk.Frame(self.master)
@@ -61,7 +61,7 @@ class PressureLevelPlotter:
         self.interval_combo.current(0)  # Default to 1 s
         self.interval_combo.pack(side=tk.LEFT)
         self.interval_combo.bind("<<ComboboxSelected>>", self.update_interval)
-        
+
         # Bottom frame
         self.bottom_frame = tk.Frame(self.master)
         self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
@@ -72,7 +72,7 @@ class PressureLevelPlotter:
         self.canvas.get_tk_widget().grid(row=0, column=0, sticky='nsew')
 
         self.ax2 = self.ax.twinx()
-        
+
         # Right frame for displaying values and status
         self.right_frame = tk.Frame(self.bottom_frame, width=150)  # Fixed width for right_frame
         self.right_frame.grid(row=0, column=1, sticky='nsew')
@@ -97,14 +97,14 @@ class PressureLevelPlotter:
         self.bottom_frame.grid_columnconfigure(0, weight=1)  # Canvas takes remaining space
         self.bottom_frame.grid_columnconfigure(1, weight=0)  # Right frame has fixed width
         self.bottom_frame.grid_rowconfigure(0, weight=1)     # Allow row to expand
-    
+
     def create_value_labels(self, name, unit, frame, row):
         name_label = tk.Label(frame, text=f"{name}")
         name_label.grid(row=row, column=0, sticky='w', padx=(0, 5), pady=2)
-        
+
         value_label = tk.Label(frame, text=f": 0.00 {unit}")
         value_label.grid(row=row, column=1, sticky='w', pady=2)
-        
+
         return value_label
     
     def on_resize(self, event):
@@ -117,7 +117,7 @@ class PressureLevelPlotter:
     def resize_figure(self):
         # Adjust font size based on the new width
         new_font_size = max(8, self.width // 75)  # Adjust the divisor as needed
-        
+
         plt.rcParams.update({
             'font.size': new_font_size,
             'axes.labelsize': new_font_size,
@@ -133,26 +133,26 @@ class PressureLevelPlotter:
         interval = self.get_interval()
         self.time_arduino_plot = self.arduino_deque.get_time_deque(interval)
         self.data_arduino_plot = self.arduino_deque.get_data_deque(interval)
-        
+
         if len(self.time_arduino_plot) <= 2:
             return
         self.update_plot()
-    
+
     def main_loop(self):
         loop_start_time = time.time()
-        
+
         self.update_display()
-        
+
         expected_exc_delay = 0.2
         if loop_start_time - self.arduino_deque.get_last_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 1:
                 self.update_plot()
-        
+
         if loop_start_time - self.arduino_deque.get_last_1min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 60:
                 self.update_plot()
             self.save_log(self.arduino_deque.get_last_1min_time(), self.arduino_deque.get_last_data())
-        
+
         if loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
@@ -168,28 +168,28 @@ class PressureLevelPlotter:
                 subject = f"{date_str} Pressure is too high."
                 contents = f"Plz check the Pressure. Pressure is too high at {date_str}."
                 send_mail(subject, contents)
-        
+
         if loop_start_time - self.arduino_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 3600:
                 self.update_plot()
-        
+
         loop_end_time = time.time()
         execution_time = loop_end_time - loop_start_time
-        
+
         # Calculate the time to wait before the next execution
         next_execution_delay = max(0, int((expected_exc_delay - execution_time) * 1000))
-        
+
         self.master.after(next_execution_delay, self.main_loop)
 
     def fetch_loop(self):
         while True:
             loop_start_time = time.time()
-            
+
             self.fetch_data()
-            
+
             elapsed_time = time.time() - loop_start_time
             sleep_time = max(0, 1 - elapsed_time)
-            
+
             time.sleep(sleep_time)
 
     def start(self):
@@ -208,14 +208,14 @@ class PressureLevelPlotter:
             if response.status_code != 200:
                 print(f"Error fetching from Arduino: {response.status_code}")
                 return [0, 0, 0, 0]
-            
+
             json = response.json()
-            
+
             if time.time() - json['timestamp'] > 5:
                 self.arduino_status_code = 'DataTooOld'
                 print("Data is too old")
                 return [0, 0, 0, 0]
-            
+
             list_of_str = [json['P_st'], json['P_pl'], json['V_pl'], json['P_pur']]
             return [float(x.split(' ')[0]) for x in list_of_str]
         except requests.exceptions.ConnectionError as e:
@@ -243,11 +243,11 @@ class PressureLevelPlotter:
         interval_str = self.interval_combo.get()
         if interval_str == "1 s":
             return 1
-        elif interval_str == "1 min":
+        if interval_str == "1 min":
             return 60
-        elif interval_str == "10 min":
+        if interval_str == "10 min":
             return 600
-        elif interval_str == "1 hour":
+        if interval_str == "1 hour":
             return 3600
         return 1
 
@@ -265,36 +265,36 @@ class PressureLevelPlotter:
         self.purifier_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[3]:.2f} psi")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.arduino_status_label.config(text=f"{': Connected' if self.arduino_status_code == 200 else self.make_error_sentence(self.arduino_status_code)}")
-    
+
     def update_plot(self):
         if len(self.time_arduino_plot) <= 2:
             return
-        
+
         self.ax.clear()
         self.ax2.clear()
-        
+
         marker_size = 3
-        
+
         self.ax.plot(self.time_arduino_plot, self.data_arduino_plot[2], marker='o', color='blue', label="Volume", markersize=marker_size)
-        
+
         self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
         self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
         self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[3], marker='o', color='skyblue', label="P_purifier", markersize=marker_size)
-        
+
         ax2_color = 'red'
-        
+
         self.ax.set_xlabel("")
         self.ax.set_ylabel("Volume (L)")
         self.ax2.set_ylabel("Pressure (psi)", color=ax2_color)
-        
+
         # y축 레이블 위치 조정
         self.ax2.yaxis.set_label_position("right")  # y축 레이블을 오른쪽으로 이동
         self.ax2.yaxis.tick_right()  # y축 눈금을 오른쪽으로 이동
-    
+
         # 그리드 추가
         self.ax.grid(True)  # RFM Plot에 그리드 추가
         self.ax2.grid(color=ax2_color)  # DRC91C Plot에 그리드 추가
-    
+
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
@@ -304,17 +304,17 @@ class PressureLevelPlotter:
 
         self.ax.set_ylim(0, max(100, max(self.data_arduino_plot[2])))
         self.ax2.set_ylim(0, max_pressure)
-            
+
         self.ax.autoscale_view()
-        
-        self.ax.legend(loc='lower left') 
-        self.ax2.legend(loc='lower right')
-        
+
+        self.ax.legend(loc='lower left')
+        self.ax2.legend(loc='upper left')
+
         # x축 눈금 글자 대각선으로 회전
         for label in self.ax.get_xticklabels():
             label.set_rotation(30)  # 30도 회전
             label.set_horizontalalignment('right')  # 오른쪽 정렬
-        
+
         self.update_xformatter(self.get_interval())
         self.set_axes_margin()
         self.canvas.draw()
@@ -366,11 +366,11 @@ class PressureLevelPlotter:
                             (self.time_arduino_plot[valley], 0),
                             textcoords="data", xytext=(self.time_arduino_plot[valley], -1),
                             ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
-        
+
         # Find local maxima and minima for storage pressure
         peaks = self.find_peaks(self.data_arduino_plot[0])
         valleys = self.find_peaks([-x for x in self.data_arduino_plot[0]])
-        
+
         for peak in peaks:
             ax.annotate(f'P_pl = {self.data_arduino_plot[1][peak]:.2f} psi\nP_st = {self.data_arduino_plot[0][peak]:.2f} psi',
                             (self.time_arduino_plot[peak], min(self.data_arduino_plot[0][peak], max_pressure) - 1),
@@ -381,7 +381,7 @@ class PressureLevelPlotter:
                             (self.time_arduino_plot[peak], 0),
                             textcoords="data", xytext=(self.time_arduino_plot[peak], -1),
                             ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
-            
+
         for valley in valleys:
             ax.annotate(f'P_pl = {self.data_arduino_plot[1][valley]:.2f} psi\nP_st = {self.data_arduino_plot[0][valley]:.2f} psi',
                             (self.time_arduino_plot[valley], max(self.data_arduino_plot[0][valley], 0) + 1),
@@ -409,30 +409,30 @@ class PressureLevelPlotter:
 
         locator = CustomDateLocator(interval)
         formatter = ticker.FuncFormatter(format_date)
-        
+
         self.ax.xaxis.set_major_locator(locator)
         self.ax.xaxis.set_major_formatter(formatter)
-        
+
         self.figure.autofmt_xdate()
 
     def save_log(self, time, arduino_data):
         # 로그 폴더 경로 설정
         log_dir = "log_pressurelevel"
-        
+
         # 현재 날짜에 맞는 폴더 경로 설정
         year = time.strftime('%Y')
         month = time.strftime('%m')
         day = time.strftime('%d')
-        
+
         # 연도/월 폴더 경로
         year_month_dir = os.path.join(log_dir, year, month)
-        
+
         # 폴더가 없으면 생성
         os.makedirs(year_month_dir, exist_ok=True)
-        
+
         # 날짜에 해당하는 로그 파일 경로
         log_file_path = os.path.join(year_month_dir, f"{day}.txt")
-        
+
         # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} L, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
