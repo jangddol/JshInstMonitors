@@ -12,6 +12,7 @@ from matplotlib import ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from CustomDateLocator import CustomDateLocator
+from PressureLevelSetting import PressureLevelSetting
 from VariousTimeDeque import VariousTimeDeque
 from CustomMail import send_mail
 
@@ -62,6 +63,9 @@ class PressureLevelPlotter:
         self.interval_combo.pack(side=tk.LEFT)
         self.interval_combo.bind("<<ComboboxSelected>>", self.update_interval)
 
+        self.setting_button = tk.Button(self.top_frame, text="Setting", command=self.open_setting)
+        self.setting_button.pack(side=tk.RIGHT)
+
         # Bottom frame
         self.bottom_frame = tk.Frame(self.master)
         self.bottom_frame.pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
@@ -81,17 +85,25 @@ class PressureLevelPlotter:
         self.data_frame = tk.Frame(self.right_frame)
         self.data_frame.pack(side=tk.TOP, fill=tk.Y)
 
-        self.plant_volume_label = self.create_value_labels("• V_plant", "L", self.data_frame, 0)
-        self.plant_pressure_label = self.create_value_labels("• P_plant", "psi", self.data_frame, 1)
-        self.storage_pressure_label = self.create_value_labels("• P_storage", "psi", self.data_frame, 2)
-        self.purifier_pressure_label = self.create_value_labels("• P_purifier", "psi", self.data_frame, 3)
+        self.label_name_unit_pairs = [
+            ("• V_plant", "L"),
+            ("• P_plant", "psi"),
+            ("• P_storage", "psi"),
+            ("• P_purifier", "psi")]
+        self.name_labels = []
+        self.value_labels = []
+        for i, (name, unit) in enumerate(self.label_name_unit_pairs):
+            name_label, value_label = self.create_value_labels(name, unit, self.data_frame, i)
+            self.name_labels.append(name_label)
+            self.value_labels.append(value_label)
+        self.last_positions = [0, 1, 2, 3]
 
         # Status frame
         self.status_frame = tk.Frame(self.right_frame)
         self.status_frame.pack(side=tk.BOTTOM, fill=tk.Y)
 
-        self.current_time_label = self.create_value_labels("Current Time", "", self.status_frame, 0)
-        self.arduino_status_label = self.create_value_labels("Arduino stat", "", self.status_frame, 1)
+        self.current_time_label = self.create_value_labels("Current Time", "", self.status_frame, 0)[1]
+        self.arduino_status_label = self.create_value_labels("Arduino stat", "", self.status_frame, 1)[1]
 
         # Configure grid weights to maintain aspect ratio
         self.bottom_frame.grid_columnconfigure(0, weight=1)  # Canvas takes remaining space
@@ -105,7 +117,7 @@ class PressureLevelPlotter:
         value_label = tk.Label(frame, text=f": 0.00 {unit}")
         value_label.grid(row=row, column=1, sticky='w', pady=2)
 
-        return value_label
+        return [name_label, value_label]
     
     def on_resize(self, event):
         # Get the new width of the window
@@ -156,7 +168,7 @@ class PressureLevelPlotter:
         if loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay:
             if self.get_interval() == 600:
                 self.update_plot()
-            if self.arduino_status_code != 200:
+            if self.arduino_status_code != 200 and self.enable_arduino.get():
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Arduino is disconnected."
@@ -259,10 +271,10 @@ class PressureLevelPlotter:
             return f": {error_code}"
 
     def update_display(self):
-        self.plant_volume_label.config(text=f": {self.arduino_deque.get_last_data()[2]:.2f} L")
-        self.plant_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[1]:.2f} psi")
-        self.storage_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[0]:.2f} psi")
-        self.purifier_pressure_label.config(text=f": {self.arduino_deque.get_last_data()[3]:.2f} psi")
+        data_order = [2, 1, 0, 3]
+        for i, position in enumerate(self.last_positions):
+            self.name_labels[i].config(text=self.label_name_unit_pairs[position][0])
+            self.value_labels[i].config(text=f": {self.arduino_deque.get_last_data()[data_order[position]]:.2f} {self.label_name_unit_pairs[position][1]}")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.arduino_status_label.config(text=f"{': Connected' if self.arduino_status_code == 200 else self.make_error_sentence(self.arduino_status_code)}")
 
@@ -437,6 +449,19 @@ class PressureLevelPlotter:
         with open(log_file_path, "a") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} L, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
 
+    def open_setting(self):
+        """
+        PressureLevelSetting 클래스로 윈도우를 엽니다.
+        """
+        self.setting_window = PressureLevelSetting(self)
+        self.setting_window.grab_set()
+    
+    def update_positions(self, positions):
+        """
+        PressureLevelSetting 클래스로부터 반환받은 positions을 이 클래스에 적용합니다.
+        """
+        self.last_positions = positions
+        self.update_display()
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
