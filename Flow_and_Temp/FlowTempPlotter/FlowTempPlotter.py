@@ -423,7 +423,7 @@ class FlowTempPlotter:
         
         # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {rfm_data[3]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
 
 def open_config_file(file_path: str):
     with open(file_path, 'r') as file: # open json from file_path
