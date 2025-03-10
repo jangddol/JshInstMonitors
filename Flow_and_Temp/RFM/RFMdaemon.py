@@ -166,27 +166,19 @@ class RFMApp:
     def read_flow_values(self):
         flow_values = [0] * COLUMNNUM
         
-        tempChannels = [self.channels[0], self.channels[1]]
-        if self.channels[0] != Channel.CH_UNKNOWN or self.channels[1] != Channel.CH_UNKNOWN:
-            self.serial.setReadingChannel_serial(tempChannels)
+        success_flag = False
+        while not success_flag:
             serial_buffer = self.serial.readline_serial()
             if serial_buffer:
-                temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
-                flow_values[0] = temp_flow_values[0]
-                flow_values[1] = temp_flow_values[1]
-        
-
-        tempChannels = [self.channels[2], self.channels[3]]
-        if self.channels[2] != Channel.CH_UNKNOWN or self.channels[3] != Channel.CH_UNKNOWN:
-            self.serial.setReadingChannel_serial(tempChannels)
-            serial_buffer = self.serial.readline_serial()
-            if serial_buffer:
-                temp_flow_values = self.parse_flow_serial_buffer(serial_buffer)
-                flow_values[2] = temp_flow_values[0]
-                flow_values[3] = temp_flow_values[1]
+                try:
+                    flows = self.parse_flow_serial_buffer(serial_buffer)
+                    for i in range(COLUMNNUM):
+                        flow_values[i] = flows[int(self.channels[i].value) - 1] if self.channels[i] != Channel.CH_UNKNOWN else 0
+                    success_flag = True
+                except Exception as e:
+                    print(e)
 
         self.last_read_time = time.time()
-
         return flow_values
 
     def handle_schedular(self):
@@ -377,17 +369,15 @@ class RFMApp:
                                         text="Sensing Output", fill='white', font=font, anchor='w')
 
     def parse_flow_serial_buffer(self, flow_string):
-        # aaaabb.bb is the format of the flow sensor data
-        # aaaa * (99/10) / 4095 is the first channel's flow value
-        # bbbb * (99/10) / 4095 is the second channel's flow value
-        # the magic numbers 99 and 40950 are determined by the flow sensor's characteristics
-        aaaabbpbb = float(flow_string)
-        aaaapbbbb = aaaabbpbb / 100
-        aaaa = int(aaaapbbbb)
-        bbbb = int((aaaapbbbb - aaaa) * 1e4)
-        flow_L = (float(aaaa) * (self.pc_input_max/10) / self.arduino_read_max)
-        flow_R = (float(bbbb) * (self.pc_input_max/10) / self.arduino_read_max)
-        return [flow_L, flow_R]
+        # aaaabbbbccccdddd is the format of the serial buffer
+        # aaaa is the flow bit of the first channel
+        # bbbb is the flow bit of the second channel
+        # cccc is the flow bit of the third channel
+        # dddd is the flow bit of the fourth channel
+        # flow bit * pc_input_max / arduino_read_max / 10 = flow value (L/min)
+        flows = [int(flow_string[i:i+4]) for i in range(0, len(flow_string), 4)]
+        flows = [x * self.pc_input_max / self.arduino_read_max / 10 for x in flows]
+        return flows
 
     def displayFlowValues(self, flowValues):
         if not self.mn:
@@ -434,7 +424,6 @@ class RFMApp:
         self.channels[index] = convert_int_to_channel(channelEntry_int)
         if self.channels[index] != Channel.CH_UNKNOWN:
             self.flowSetPoints_Shown[index] = "paused"
-            self.serial.setReadingChannel_serial(self.channels)
 
     def is_key_code_change_highlight_entry(self, key_code):
         return key_code == 'Tab' or key_code == 'Left' or key_code == 'Right' or key_code == 'Up' or key_code == 'Down'
@@ -559,6 +548,11 @@ def resource_path(relative_path):
 if __name__ == "__main__":
     import threading
     from flask import Flask, jsonify
+    import logging
+
+    # Disable Flask's default logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
     
     config_file_path = "rfm_config.json"
     # If loading fails, create a default config.json.

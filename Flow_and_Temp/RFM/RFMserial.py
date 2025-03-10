@@ -7,30 +7,6 @@ import time
 class CMD(enum.Enum):
     # serial command dictionary constant
     # U means UNKNOWN
-    CMD_SET_CH_L1MU = "t"
-    CMD_SET_CH_L1M1 = "y"
-    CMD_SET_CH_L1M2 = "u"
-    CMD_SET_CH_L1M3 = "i"
-    CMD_SET_CH_L1M4 = "o"
-    CMD_SET_CH_L2MU = "p"
-    CMD_SET_CH_L2M1 = "g"
-    CMD_SET_CH_L2M2 = "h"
-    CMD_SET_CH_L2M3 = "j"
-    CMD_SET_CH_L2M4 = "k"
-    CMD_SET_CH_L3MU = "l"
-    CMD_SET_CH_L3M1 = "b"
-    CMD_SET_CH_L3M2 = "n"
-    CMD_SET_CH_L3M3 = "m"
-    CMD_SET_CH_L3M4 = "Q"
-    CMD_SET_CH_L4MU = "W"
-    CMD_SET_CH_L4M1 = "E"
-    CMD_SET_CH_L4M2 = "R"
-    CMD_SET_CH_L4M3 = "T"
-    CMD_SET_CH_L4M4 = "Y"
-    CMD_SET_CH_LUM1 = "U"
-    CMD_SET_CH_LUM2 = "I"
-    CMD_SET_CH_LUM3 = "O"
-    CMD_SET_CH_LUM4 = "P"
     CMD_SET_CH1_ON = "z"
     CMD_SET_CH2_ON = "x"
     CMD_SET_CH3_ON = "c"
@@ -61,61 +37,6 @@ class RFMserial_Real:
 
     def reset_serial(self):
         self.__write(CMD.CMD_RESET.value)
-
-    def setReadingChannel_serial(self, channels):
-        if channels[0] == Channel.CH1:
-            if channels[1] == Channel.CH1:
-                self.__write(CMD.CMD_SET_CH_L1M1.value)
-            elif channels[1] == Channel.CH2:
-                self.__write(CMD.CMD_SET_CH_L1M2.value)
-            elif channels[1] == Channel.CH3:
-                self.__write(CMD.CMD_SET_CH_L1M3.value)
-            elif channels[1] == Channel.CH4:
-                self.__write(CMD.CMD_SET_CH_L1M4.value)
-            elif channels[1] == Channel.CH_UNKNOWN:
-                self.__write(CMD.CMD_SET_CH_L1MU.value)
-        elif channels[0] == Channel.CH2:
-            if channels[1] == Channel.CH1:
-                self.__write(CMD.CMD_SET_CH_L2M1.value)
-            elif channels[1] == Channel.CH2:
-                self.__write(CMD.CMD_SET_CH_L2M2.value)
-            elif channels[1] == Channel.CH3:
-                self.__write(CMD.CMD_SET_CH_L2M3.value)
-            elif channels[1] == Channel.CH4:
-                self.__write(CMD.CMD_SET_CH_L2M4.value)
-            elif channels[1] == Channel.CH_UNKNOWN:
-                self.__write(CMD.CMD_SET_CH_L2MU.value)
-        elif channels[0] == Channel.CH3:
-            if channels[1] == Channel.CH1:
-                self.__write(CMD.CMD_SET_CH_L3M1.value)
-            elif channels[1] == Channel.CH2:
-                self.__write(CMD.CMD_SET_CH_L3M2.value)
-            elif channels[1] == Channel.CH3:
-                self.__write(CMD.CMD_SET_CH_L3M3.value)
-            elif channels[1] == Channel.CH4:
-                self.__write(CMD.CMD_SET_CH_L3M4.value)
-            elif channels[1] == Channel.CH_UNKNOWN:
-                self.__write(CMD.CMD_SET_CH_L3MU.value)
-        elif channels[0] == Channel.CH4:
-            if channels[1] == Channel.CH1:
-                self.__write(CMD.CMD_SET_CH_L4M1.value)
-            elif channels[1] == Channel.CH2:
-                self.__write(CMD.CMD_SET_CH_L4M2.value)
-            elif channels[1] == Channel.CH3:
-                self.__write(CMD.CMD_SET_CH_L4M3.value)
-            elif channels[1] == Channel.CH4:
-                self.__write(CMD.CMD_SET_CH_L4M4.value)
-            elif channels[1] == Channel.CH_UNKNOWN:
-                self.__write(CMD.CMD_SET_CH_L4MU.value)
-        elif channels[0] == Channel.CH_UNKNOWN:
-            if channels[1] == Channel.CH1:
-                self.__write(CMD.CMD_SET_CH_LUM1.value)
-            elif channels[1] == Channel.CH2:
-                self.__write(CMD.CMD_SET_CH_LUM2.value)
-            elif channels[1] == Channel.CH3:
-                self.__write(CMD.CMD_SET_CH_LUM3.value)
-            elif channels[1] == Channel.CH4:
-                self.__write(CMD.CMD_SET_CH_LUM4.value)
 
     def writeFlowSetpoint_serial(self, flowSetpoint, ch):
         self.__write(flowSetpoint)
@@ -154,28 +75,26 @@ class RFMserial_Real:
         self.ser.read_until(expected=lf) # 첫 번째 읽기: 현재 라인의 나머지 부분을 읽고 버립니다
         self.ser.read_until(expected=lf) # 두 번째 읽기: 딜레이를 주기 위한 잉여 읽기
         line = self.ser.read_until(expected=lf).decode('ascii').strip() # 세 번째 읽기: 온전한 새 라인을 읽습니다
-        while not line: # 빈 라인이면 다시 읽습니다
+        while not line or len(line) != 18: # 빈 라인이면 다시 읽습니다
             line = self.ser.read_until(expected=lf).decode('ascii').strip()
         try:
-            float_value = float(line)
-        except Exception:
-            line = "00000.00"
+            parsed_numbers = [line[i:i+4] for i in range(0, len(line), 4)]
+            print(line, " ", parsed_numbers, " ", len(line))
+        except Exception as e:
+            print(e)
+            line = "0000000000000000"
         return line
 
 class RFMserial_Sim:
     def __init__(self, port, baudrate):
         self.channel_state = [False, False, False, False]
         self.flow_setpoint = [0, 0, 0, 0]
-        self.channels = [Channel.CH_UNKNOWN, Channel.CH_UNKNOWN]
+        self.channels = [Channel.CH_UNKNOWN, Channel.CH_UNKNOWN, Channel.CH_UNKNOWN, Channel.CH_UNKNOWN]
 
     def reset_serial(self):
         self.channel_state = [False, False, False, False]
         self.flow_setpoint = [0, 0, 0, 0]
-        self.first_ch = Channel.CH_UNKNOWN
-        self.second_ch = Channel.CH_UNKNOWN
-
-    def setReadingChannel_serial(self, channels):
-        self.channels = deepcopy(channels)
+        self.channels = [Channel.CH_UNKNOWN, Channel.CH_UNKNOWN, Channel.CH_UNKNOWN, Channel.CH_UNKNOWN]
 
     def writeFlowSetpoint_serial(self, flowSetpoint, ch):
         if ch == Channel.CH1:
@@ -207,25 +126,12 @@ class RFMserial_Sim:
         elif ch == Channel.CH4:
             self.channel_state[3] = False
 
-    def unparse_flow_serial_buffer(self, flow_L, flow_R):
-        _flow_L = int(float(flow_L) * 4095 / 99)
-        _flow_R = int(float(flow_R) * 4095 / 99)
-        return str(_flow_L * 100 + _flow_R / 100)
+    def unparse_flow_serial_buffer(self):
+        _flows = [int(float(flows) * 4095 / 99) for flows in self.flow_setpoint]
+        return "{:04d}{:04d}{:04d}{:04d}".format(_flows[0], _flows[1], _flows[2], _flows[3])
 
     def readline_serial(self):
-        flow = [0, 0]
-        for i in range(2):
-            if self.channels[i] == Channel.CH1:
-                flow[i] = self.flow_setpoint[0]
-            elif self.channels[i] == Channel.CH2:
-                flow[i] = self.flow_setpoint[1]
-            elif self.channels[i] == Channel.CH3:
-                flow[i] = self.flow_setpoint[2]
-            elif self.channels[i] == Channel.CH4:
-                flow[i] = self.flow_setpoint[3]
-            else:
-                flow[i] = 0
-        return self.unparse_flow_serial_buffer(flow[0], flow[1])
+        return self.unparse_flow_serial_buffer()
     
 
 class RFMserial:
@@ -237,9 +143,6 @@ class RFMserial:
     
     def reset_serial(self):
         self.rfmserial.reset_serial()
-    
-    def setReadingChannel_serial(self, channels):
-        self.rfmserial.setReadingChannel_serial(channels)
     
     def writeFlowSetpoint_serial(self, flowSetpoint, ch):
         self.rfmserial.writeFlowSetpoint_serial(flowSetpoint, ch)
