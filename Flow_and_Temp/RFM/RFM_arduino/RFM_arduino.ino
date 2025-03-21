@@ -1,6 +1,3 @@
-int flowSetpointBuffer = 0;
-char MeasureBuffer[19];
-
 // pc specific
 const int PC_INPUT_MAX = 200;
 
@@ -30,14 +27,18 @@ const char NUMBER_COMMANDS[10] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '
 const char RESET_COMMAND = 'B';
 
 // pin assignment
-const int FLOW_STATE_CH[NUM_CHANNELS] = {2, 7, 8, 13};
-const int FLOW_SETPOINT_CH[NUM_CHANNELS] = {3, 5, 9, 11};
+const int FLOW_STATE_CH[NUM_CHANNELS] = {2, 7, 8, 13};    // STM1 : 2,7,8,13 ; STM3 : 2,3,4,7
+const int FLOW_SETPOINT_CH[NUM_CHANNELS] = {3, 5, 9, 11}; // STM1 : 3,5,9,11 ; STM3 : 10,8,13,5
 const int FLOW_MEAS_CH[NUM_CHANNELS] = {A0, A1, A2, A3};
+
+int set_values[4] = {0, 0, 0, 0}; // setpoint value를 저장해놓는 배열
+int flowSetpointBuffer = 0;
+char MeasureBuffer[35];
 
 void resetMeasureBuffer()
 {
-    memset(MeasureBuffer, '0', 18); // MeasureBuffer의 처음 16바이트를 '0'으로 설정
-    MeasureBuffer[18] = '\0';       // null 종료 문자 추가
+    memset(MeasureBuffer, '0', 34); // MeasureBuffer의 처음 34바이트를 '0'으로 설정
+    MeasureBuffer[34] = '\0';       // null 종료 문자 추가
 }
 
 int getIndexInArray(const char arr[], int size, int element)
@@ -57,23 +58,25 @@ bool isInArray(const char arr[], int size, int element)
     return getIndexInArray(arr, size, element) != -1;
 }
 
-// 4개의 4자리 정수를 16자리 문자열로 포맷하는 함수
-void formatNumbersTo16Chars(int *values, char *result)
+void makeMeasrueBufferFromValues(int *values, char *result)
 {
     // 각 정수를 4자리로 포맷하여 result에 저장
-    snprintf(result, 19, "%04d%04d%04d%04d%01d%01d", values[0], values[1], values[2], values[3], ARDUINO_WRITE_12BIT, ARDUINO_READ_12BIT);
+    snprintf(result, 35, "%04d%04d%04d%04d%04d%04d%04d%04d%01d%01d",
+             values[0], values[1], values[2], values[3],
+             set_values[0], set_values[1], set_values[2], set_values[3],
+             ARDUINO_WRITE_12BIT, ARDUINO_READ_12BIT);
 }
 
 void updateMeasureBuffer()
 {
-    int values[NUM_CHANNELS] = {0, 0, 0, 0};
+    int measured_values[NUM_CHANNELS] = {0, 0, 0, 0};
     for (int i = 0; i < NUM_CHANNELS; i++)
     {
-        values[i] = analogRead(FLOW_MEAS_CH[i]);
-        values[i] = values[i] % 10000; // Ensure values are 4 digit decimal numbers
+        measured_values[i] = analogRead(FLOW_MEAS_CH[i]);
+        measured_values[i] = measured_values[i] % 10000; // Ensure values are 4 digit decimal numbers
     }
 
-    formatNumbersTo16Chars(values, MeasureBuffer);
+    makeMeasrueBufferFromValues(measured_values, MeasureBuffer);
 }
 
 void writeFlowState(char command)
@@ -98,6 +101,7 @@ void writeFlowSetpointSetting(char command)
 
     int value = map(flowSetpointBuffer, 0, PC_INPUT_MAX, 0, ARDUINO_WRITE_MAX);
     analogWrite(FLOW_SETPOINT_CH[channelIndex], value);
+    set_values[channelIndex] = value;
     flowSetpointBuffer = 0;
 }
 

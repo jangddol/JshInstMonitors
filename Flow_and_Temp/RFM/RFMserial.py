@@ -1,8 +1,6 @@
-from copy import deepcopy
-import serial
 import enum
+import serial
 from channel import Channel
-import time
 
 class CMD(enum.Enum):
     # serial command dictionary constant
@@ -75,7 +73,7 @@ class RFMserial_Real:
         self.ser.read_until(expected=lf) # 첫 번째 읽기: 현재 라인의 나머지 부분을 읽고 버립니다
         self.ser.read_until(expected=lf) # 두 번째 읽기: 딜레이를 주기 위한 잉여 읽기
         line = self.ser.read_until(expected=lf).decode('ascii').strip() # 세 번째 읽기: 온전한 새 라인을 읽습니다
-        while not line or len(line) != 18: # 빈 라인이면 다시 읽습니다
+        while not line or len(line) != 34: # 빈 라인이면 다시 읽습니다
             line = self.ser.read_until(expected=lf).decode('ascii').strip()
         try:
             parsed_numbers = [line[i:i+4] for i in range(0, len(line), 4)]
