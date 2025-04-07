@@ -230,16 +230,20 @@ class SchedularWindow:
     def save_schedules(self):
         schedules_data = []
         for widget in self.schedule_widgets:
+            action = widget.action
+            number = 0
+            if action == Action.Setpoint:
+                number = widget.number_var.get()
             schedule_data = {
                 "day": widget.day.value,
                 "hour": widget.hour,
                 "minute": widget.minute,
                 "channel": widget.channelname.value,
-                "action": widget.action.value,
-                "number": widget.number_var.get()
+                "action": action.value,
+                "number": number
             }
             schedules_data.append(schedule_data)
-        
+
         file_path = filedialog.asksaveasfilename(defaultextension=".json",
                                                  filetypes=[("JSON files", "*.json")])
         if not file_path:  # 사용자가 취소를 누른 경우
