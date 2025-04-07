@@ -547,12 +547,7 @@ def resource_path(relative_path):
 
 if __name__ == "__main__":
     import threading
-    from flask import Flask, jsonify
-    import logging
-
-    # Disable Flask's default logging
-    log = logging.getLogger('werkzeug')
-    log.setLevel(logging.ERROR)
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
     
     config_file_path = "rfm_config.json"
     # If loading fails, create a default config.json.
@@ -563,29 +558,39 @@ if __name__ == "__main__":
         with open(config_file_path, 'w') as file:
             json.dump({'arduino_port': 'COM3', 'localserver_port': 5000, 'pc_input_max':99, 'arduino_read_max':4095}, file)
         arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
-    
-    # Flask 애플리케이션 설정
-    app = Flask(__name__)
 
-    @app.route('/get_value', methods=['GET'])
-    def get_value():
-        return jsonify({'Tip': rfmapp.last_flow_values[0], 'Shield': rfmapp.last_flow_values[1], 'Bypass': rfmapp.last_flow_values[2], 'Pumping': rfmapp.last_flow_values[3], 'timestamp': rfmapp.last_read_time})
+    class RFMHandler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/get_value':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                
+                response = {
+                    'Tip': rfmapp.last_flow_values[0],
+                    'Shield': rfmapp.last_flow_values[1], 
+                    'Bypass': rfmapp.last_flow_values[2],
+                    'Pumping': rfmapp.last_flow_values[3],
+                    'timestamp': rfmapp.last_read_time
+                }
+                self.wfile.write(json.dumps(response).encode())
+            else:
+                self.send_error(404)
 
     def run_app(port, pc_input_max, arduino_read_max):
-        # GUI 애플리케이션 실행
         master = tk.Tk()
         master.iconbitmap(resource_path("MFC.ico"))
         global rfmapp
         rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
         rfmapp.master.mainloop()
 
-    def run_flask():
-        # Flask 서버 실행
-        app.run(host='0.0.0.0', port=localserver_port, use_reloader=False)
+    def run_server():
+        server = HTTPServer(('0.0.0.0', localserver_port), RFMHandler)
+        server.serve_forever()
 
-    # 서브 스레드에서 Flask 서버 실행
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+    # Start HTTP server in a separate thread
+    server_thread = threading.Thread(target=run_server)
+    server_thread.daemon = True
+    server_thread.start()
 
     run_app(arduino_port, pc_input_max, arduino_read_max)
