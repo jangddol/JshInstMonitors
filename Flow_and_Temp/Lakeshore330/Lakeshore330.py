@@ -20,11 +20,16 @@ class Lakeshore330:
 
     def get_sensor_value_pair(self)-> tuple[str, str]:
         self.device.write('SDAT?')
-        head_temp = str(self.device.read())[:7] + " K"
+        head_temp = str(self.device.read())[:7]
         self.device.write('CDAT?')
         tip_temp = str(self.device.read())[:7]
-        if tip_temp.replace(" ", "") == '0L':
+
+        if head_temp.replace(" ", "") == 'OL':
+            head_temp = "00.000"
+        if tip_temp.replace(" ", "") == 'OL':
             tip_temp = "00.000"
+
+        head_temp = head_temp + " K"
         tip_temp = tip_temp + " K"
         return head_temp, tip_temp
 
