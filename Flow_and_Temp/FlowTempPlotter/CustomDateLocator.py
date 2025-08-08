@@ -1,12 +1,23 @@
 import matplotlib.dates as mdates
 from matplotlib.ticker import Locator
 from datetime import timedelta
+from typing import List
 
 class CustomDateLocator(Locator):
-    def __init__(self, interval):
-        self.interval = interval
+    def __init__(self, interval: int):
+        """Initialize the CustomDateLocator with a specific interval.
 
-    def __call__(self):
+        Args:
+            interval (int): The interval in seconds for date ticks.
+        """
+        self.interval: int = interval
+
+    def __call__(self) -> List[float]:
+        """Generate a list of date ticks based on the interval.
+
+        Returns:
+            List[float]: A list of date ticks in matplotlib's internal format.
+        """
         vmin, vmax = self.axis.get_view_interval()
         start = mdates.num2date(vmin).replace(microsecond=0)
         end = mdates.num2date(vmax).replace(microsecond=0)
