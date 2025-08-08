@@ -7,6 +7,19 @@ class Channel(enum.Enum):
     CH4 = "4"
     CH_UNKNOWN = "?"
 
+    @staticmethod
+    def from_int(value: int):
+        """Convert an integer to a Channel enum value."""
+        if value == 1:
+            return Channel.CH1
+        if value == 2:
+            return Channel.CH2
+        if value == 3:
+            return Channel.CH3
+        if value == 4:
+            return Channel.CH4
+        return Channel.CH_UNKNOWN
+
 def convert_int_to_channel(ch):
     if ch == 1:
         return Channel.CH1

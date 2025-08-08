@@ -29,9 +29,10 @@ class RFMserial_Real:
         self.ser.reset_output_buffer()
 
     def __write(self, data):
-        self.ser.reset_input_buffer() # 이거 안하면 write_timeout 걸리던데 왜인지는 모름
+        """Write data to the serial port after resetting the input buffer."""
+        self.ser.reset_input_buffer()  # Prevent write_timeout issues
         self.ser.write((data + '\n').encode('ascii'))
-        self.ser.flush() # 다 써지기를 기다림
+        self.ser.flush()  # Ensure all data is written before proceeding
 
     def reset_serial(self):
         self.__write(CMD.CMD_RESET.value)
