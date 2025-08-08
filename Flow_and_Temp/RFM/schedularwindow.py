@@ -113,22 +113,19 @@ class ScheduleWidget:
         self.frame.pack(fill=tk.X)
 
     def validate_hour(self, value_if_allowed):
+        """Validate if the hour input is within the range 0-23."""
         value_if_allowed = str(value_if_allowed)
-        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 23:
-            return True
-        return False
+        return value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 23
 
     def validate_minute(self, value_if_allowed):
+        """Validate if the minute input is within the range 0-59."""
         value_if_allowed = str(value_if_allowed)
-        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 59:
-            return True
-        return False
+        return value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 59
 
     def validate_integer(self, value_if_allowed):
+        """Validate if the input is an integer within the range 0-99."""
         value_if_allowed = str(value_if_allowed)
-        if value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 99:
-            return True
-        return False
+        return value_if_allowed.isdigit() and 0 <= int(value_if_allowed) <= 99
 
     def update_number_entry(self, *args):
         if self.action_var.get() in ["On", "Off"]:

@@ -271,6 +271,7 @@ class RFMApp:
             self.switchs_toggle[index].config(relief="sunken", text="ON")
 
     def toggle_switch(self, switch_index, last_switch_state):
+        """Toggle the state of a switch and update related settings."""
         if last_switch_state:
             self.toggleStates[switch_index] = ToggleState.Off
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
