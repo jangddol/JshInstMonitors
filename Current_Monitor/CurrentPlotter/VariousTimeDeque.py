@@ -1,8 +1,15 @@
 import time
 from collections import deque
 from datetime import datetime, timedelta
+from enum import Enum
 
 MAXLEN = 100
+
+class Interval(Enum):
+    ONE_SECOND = 1
+    ONE_MINUTE = 60
+    TEN_MINUTES = 600
+    ONE_HOUR = 3600
 
 class VariousTimeDeque:
     def __init__(self, numdata):
@@ -48,25 +55,25 @@ class VariousTimeDeque:
             for i in range(self.numdata):
                 self.data_1hour[i].append(data[i])
 
-    def get_time_deque(self, interval):
-        if interval == 1:
+    def get_time_deque(self, interval: Interval):
+        if interval == Interval.ONE_SECOND:
             return self.time_1s
-        elif interval == 60:
+        elif interval == Interval.ONE_MINUTE:
             return self.time_1min
-        elif interval == 600:
+        elif interval == Interval.TEN_MINUTES:
             return self.time_10min
-        elif interval == 3600:
+        elif interval == Interval.ONE_HOUR:
             return self.time_1hour
         return None
     
-    def get_data_deque(self, interval):
-        if interval == 1:
+    def get_data_deque(self, interval: Interval):
+        if interval == Interval.ONE_SECOND:
             return self.data_1s
-        elif interval == 60:
+        elif interval == Interval.ONE_MINUTE:
             return self.data_1min
-        elif interval == 600:
+        elif interval == Interval.TEN_MINUTES:
             return self.data_10min
-        elif interval == 3600:
+        elif interval == Interval.ONE_HOUR:
             return self.data_1hour
         return None
     

@@ -12,7 +12,7 @@ from matplotlib import ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 from CustomDateLocator import CustomDateLocator
-from VariousTimeDeque import VariousTimeDeque
+from VariousTimeDeque import VariousTimeDeque, Interval
 
 MAXLEN = 100
 
@@ -30,8 +30,8 @@ class CurrentPlotter:
         # Deques for storing values
         self.arduino_deque = VariousTimeDeque(1) # 0: Current
 
-        self.time_arduino_plot = self.arduino_deque.get_time_deque(1)
-        self.data_arduino_plot = self.arduino_deque.get_data_deque(1)
+        self.time_arduino_plot = self.arduino_deque.get_time_deque(Interval.ONE_SECOND)
+        self.data_arduino_plot = self.arduino_deque.get_data_deque(Interval.ONE_SECOND)
 
         self.arduino_status_code = "Off"
 
