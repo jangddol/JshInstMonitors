@@ -24,8 +24,12 @@ class SerialMediator:
         self.is_running = True
         self.reconnect_delay = 1.0  # seconds
 
-    def open_serial(self) -> None:
-        """Safely open serial connection with proper error handling"""
+    def open_serial_connection(self):
+        """Safely open a serial connection with proper error handling.
+
+        This method ensures that the serial connection is established correctly
+        and handles any exceptions that may occur during the process.
+        """
         try:
             if self.arduino is not None and self.arduino.is_open:
                 self.arduino.close()
@@ -37,8 +41,12 @@ class SerialMediator:
             print(f"Failed to open serial port: {e}")
             self.arduino = None
 
-    def close(self) -> None:
-        """Safely close all resources"""
+    def close_resources(self):
+        """Safely close all resources.
+
+        This method ensures that all resources, such as serial connections, are
+        properly closed to prevent resource leaks.
+        """
         self.is_running = False
         if self.arduino is not None and self.arduino.is_open:
             self.arduino.close()
@@ -100,7 +108,7 @@ class SerialMediator:
         while self.is_running:
             try:
                 if self.arduino is None or not self.arduino.is_open:
-                    self.open_serial()
+                    self.open_serial_connection()
                     time.sleep(self.reconnect_delay)
                     continue
 
@@ -171,7 +179,7 @@ def main():
     except KeyboardInterrupt:
         print("Shutting down...")
     finally:
-        mediator.close()
+        mediator.close_resources()
 
 if __name__ == "__main__":
     main()
