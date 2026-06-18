@@ -1,5 +1,13 @@
 import tkinter as tk
 
+from CalibrationWindow import CalibrationWindow
+
+# Maps label_name_unit_pairs index → arduino_deque channel index
+# label 0: V_plant → deque[2], label 1: P_plant → deque[1],
+# label 2: P_storage → deque[0], label 3: P_purifier → deque[3]
+_LABEL_TO_DEQUE = [2, 1, 0, 3]
+
+
 class PressureLevelSetting(tk.Toplevel):
     """
     PressureLevelSetting 클래스에 있는 메인 윈도우의 label 위젯의 위치를 조정하는 클래스입니다.
@@ -17,7 +25,7 @@ class PressureLevelSetting(tk.Toplevel):
         self.title("Pressure Level Setting")
         
         # Set the size of the window
-        self.geometry("300x200")  # Width x Height
+        self.geometry("360x200")  # Width x Height
         
         self.label_name_unit_pairs = self.mother.label_name_unit_pairs
         self.is_plot = self.mother.is_plot  # is_plot 리스트를 가져옴
@@ -25,25 +33,36 @@ class PressureLevelSetting(tk.Toplevel):
         self.pairs = []
         self.frames = []  # 데이터 프레임들
         self.checkboxes = []  # 체크박스 리스트 추가
-        
+
         # 고정된 위치에 화살표 버튼들 생성
         self.up_buttons = []
         self.down_buttons = []
-        
+
+        # Tracks open CalibrationWindow instances keyed by arduino_deque channel index
+        self._cal_windows: dict[int, CalibrationWindow] = {}
+
         # 데이터 프레임들과 체크박스 생성
         for i, (label, unit) in enumerate(self.label_name_unit_pairs):
             frame = tk.Frame(self)
             frame.grid(row=i, column=0, sticky="ew", padx=5, pady=5)
-            
+
             lbl = tk.Label(frame, text=label)
             lbl.pack(side=tk.LEFT)
-            
+
             # 체크박스 추가
             var = tk.BooleanVar(value=self.is_plot[i])
             checkbox = tk.Checkbutton(frame, variable=var, command=lambda i=i, var=var: self.update_is_plot(i, var))
             checkbox.pack(side=tk.LEFT)
             self.checkboxes.append(var)
-            
+
+            # Cal 버튼 — 해당 채널의 캘리브레이션 창 열기
+            deque_ch = _LABEL_TO_DEQUE[i]
+            cal_btn = tk.Button(
+                frame, text="Cal",
+                command=lambda ch=deque_ch: self._open_calibration(ch),
+            )
+            cal_btn.pack(side=tk.LEFT, padx=(4, 0))
+
             self.frames.append(frame)
             self.pairs.append((i, label, frame))
         
@@ -61,11 +80,8 @@ class PressureLevelSetting(tk.Toplevel):
     
     def update_is_plot(self, index, var):
         """체크박스 상태를 업데이트하여 is_plot 리스트에 반영"""
-        # index는 현재 행의 인덱스, 실제로는 pairs[index]의 initial_index를 사용해야 함
-        initial_index = self.pairs[index][0]  # pairs[index]의 첫 번째 요소가 원래 인덱스
+        initial_index = self.pairs[index][0]
         self.is_plot[initial_index] = var.get()
-        print(f"체크박스 {index} (원래 인덱스: {initial_index}) 상태 변경: {var.get()}")
-        print(f"현재 is_plot: {self.is_plot}")
     
     def move_up(self, row):
         """고정된 행의 데이터를 위로 이동"""
@@ -88,25 +104,34 @@ class PressureLevelSetting(tk.Toplevel):
     def update_widgets(self):
         """위젯의 위치를 업데이트 - 화살표는 고정, 데이터 프레임만 재배치"""
         for i, (initial_index, label, frame) in enumerate(self.pairs):
-            # 데이터 프레임만 재배치 (화살표는 고정)
             frame.grid(row=i, column=0, sticky="ew", padx=5, pady=5)
-            # 체크박스 상태를 해당 항목의 원래 인덱스에 맞는 is_plot 값으로 동기화
             self.checkboxes[i].set(self.is_plot[initial_index])
-        print(f"현재 is_plot: {self.is_plot}")
-        print(f"현재 pairs: {[(idx, label) for idx, label, frame in self.pairs]}")
     
+    def _open_calibration(self, channel_index: int) -> None:
+        """Open the CalibrationWindow for the given arduino_deque channel.
+
+        If a window for that channel is already open, bring it to front instead
+        of creating a duplicate.
+        """
+        existing = self._cal_windows.get(channel_index)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    return
+            except tk.TclError:
+                pass
+        win = CalibrationWindow(self, self.mother, channel_index)
+        self._cal_windows[channel_index] = win
+
     def on_closing(self):
         """창을 닫을 때 현재 상태를 반환"""
-        positions = [initial_index for initial_index, label, frame in self.pairs]
-        
-        print("=== 설정 창 닫기 - 디버깅 정보 ===")
-        print(f"전달할 positions: {positions}")
-        print(f"전달할 is_plot: {self.is_plot}")
-        print("각 항목별 상세 정보:")
-        for i, (initial_index, label, frame) in enumerate(self.pairs):
-            print(f"  행 {i}: {label} (원래 인덱스: {initial_index}, 플롯 표시: {self.is_plot[i]})")
-        print("================================")
-        
-        self.mother.update_positions(positions)
-        self.mother.update_is_plot(self.is_plot)
-        self.destroy()
+        try:
+            positions = [initial_index for initial_index, label, frame in self.pairs]
+            self.mother.update_positions(positions)
+            self.mother.update_is_plot(self.is_plot)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.destroy()
