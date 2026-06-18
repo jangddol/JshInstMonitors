@@ -507,6 +507,20 @@ class FlowTempPlotter:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {rfm_data[3]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
 
 
+    def _on_close(self) -> None:
+        """Handle window close: clean up matplotlib then force-exit.
+
+        plt.close('all') must be called before root.destroy() to prevent
+        matplotlib's atexit handler from trying to access the already-destroyed
+        tkinter root, which causes the process to hang (especially in
+        PyInstaller --noconsole builds).  os._exit() then bypasses the rest of
+        Python's shutdown sequence entirely, guaranteeing the process exits.
+        """
+        plt.close('all')
+        self.master.destroy()
+        os._exit(0)
+
+
 def open_config_file(file_path: str) -> tuple[int, int]:
     """Open and parse the configuration file.
 
@@ -560,4 +574,5 @@ if __name__ == "__main__":
     root.iconbitmap(resource_path("FlowTempPlotter.ico"))
     app = FlowTempPlotter(root, rfm_localserver_port, drc91c_localserver_port)
     app.start()
+    root.protocol("WM_DELETE_WINDOW", app._on_close)
     root.mainloop()
