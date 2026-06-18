@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import os
 import sys
 import threading
@@ -15,6 +16,7 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+from CalibrationWindow import CalibrationWindow, CHANNEL_KEYS
 from CustomDateLocator import CustomDateLocator
 from PressureLevelSetting import PressureLevelSetting
 from VariousTimeDeque import VariousTimeDeque, Interval
@@ -24,6 +26,23 @@ MAXLEN = 100
 
 # 테스트 모드 설정 (True로 설정하면 시뮬레이션 데이터 사용)
 IS_TEST = False
+
+AUTO_RAISE_INTERVAL_SEC = 30 if IS_TEST else 30 * 60  # 30 s (test) / 30 min (production)
+
+# Calibration default: identity map (no correction)
+_CALIBRATION_DEFAULT = [
+    {"orig1": 0.0, "calib1": 0.0, "orig2": 1.0, "calib2": 1.0}
+    for _ in range(4)
+]
+
+
+def _get_writable_path(filename: str) -> str:
+    """Return a writable path next to the exe (frozen) or this script (dev)."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.abspath(os.path.dirname(__file__))
+    return os.path.join(base, filename)
 
 
 class PressureLevelPlotter:
@@ -47,6 +66,15 @@ class PressureLevelPlotter:
         # Email alert notification window (non-modal)
         self.email_alert_window = None
 
+        # Auto-raise timer
+        self._last_raise_time = time.time()
+
+        # Load persisted config (calibrations + channel order/visibility)
+        _config = self._load_config()
+        self.calibrations = _config["calibrations"]
+        self.last_positions = _config["channel_order"]
+        self.is_plot = _config["channel_visible"]
+
         self.update_interval(None)
         self.main_loop()
 
@@ -58,12 +86,16 @@ class PressureLevelPlotter:
         # IntVar를 사용하여 체크박스 상태를 저장
         self.enable_arduino = tk.IntVar()
         self.enable_localmaxmin = tk.IntVar()
+        self.enable_auto_raise = tk.IntVar()
 
         self.checkbox_arduino = tk.Checkbutton(self.top_frame, text="Enable Arduino", variable=self.enable_arduino, command=self.on_arduino_checkbox_change)
         self.checkbox_arduino.pack(side=tk.LEFT)
 
         self.checkbox_localmaxmin = tk.Checkbutton(self.top_frame, text="Local Max/Min", variable=self.enable_localmaxmin, command=self.update_plot)
         self.checkbox_localmaxmin.pack(side=tk.LEFT)
+
+        self.checkbox_auto_raise = tk.Checkbutton(self.top_frame, text="Auto Raise (30 min)", variable=self.enable_auto_raise)
+        self.checkbox_auto_raise.pack(side=tk.LEFT)
 
         self.interval_label = tk.Label(self.top_frame, text="Interval:")
         self.interval_label.pack(side=tk.LEFT)
@@ -166,6 +198,12 @@ class PressureLevelPlotter:
     def main_loop(self):
         loop_start_time = time.time()
 
+        if (self.enable_auto_raise.get() == 1 and
+                loop_start_time - self._last_raise_time >= AUTO_RAISE_INTERVAL_SEC):
+            self._last_raise_time = loop_start_time
+            self.master.lift()
+            self.master.attributes('-topmost', True)
+            self.master.attributes('-topmost', False)
 
         self.update_display()
 
@@ -206,44 +244,43 @@ class PressureLevelPlotter:
             if self.enable_arduino.get() == 1:
                 try:
                     last_data = self.arduino_deque.get_last_data()
-                    if len(last_data) >= 4 and (last_data[1] > 3.0 or last_data[0] > 9.0):
-                        now = datetime.now()
-                        date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                        p_plant = last_data[1]
-                        p_storage = last_data[0]
-                        subject = f"{date_str} Pressure is too high : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
-                        content = f"Plz check the Pressure. Pressure is too high at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
-                        print(f"[EMAIL] 압력 임계값 초과 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
-                        print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
-                        result, error_msg = send_mail(subject, content)
-                        if result:
-                            print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 초과 알림")
-                        else:
-                            print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 초과 알림")
-                            print(f"[EMAIL] 실패 원인: {error_msg}")
-                            alert_message = f"Failed to send pressure alert email"
-                            if error_msg:
-                                alert_message += f"\n\nError: {error_msg}"
-                            self.show_email_alert(alert_message)
-                    if len(last_data) >= 4 and (last_data[1] < 0.25):
-                        now = datetime.now()
-                        date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                        p_plant = last_data[1]
-                        p_storage = last_data[0]
-                        subject = f"{date_str} Storage Pressure is too low : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
-                        content = f"Plz check the Pressure. Pressure is too low at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
-                        print(f"[EMAIL] 압력 임계값 미만 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
-                        print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
-                        result, error_msg = send_mail(subject, content)
-                        if result:
-                            print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 미만 알림")
-                        else:
-                            print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 미만 알림")
-                            print(f"[EMAIL] 실패 원인: {error_msg}")
-                            alert_message = f"Failed to send pressure alert email"
-                            if error_msg:
-                                alert_message += f"\n\nError: {error_msg}"
-                            self.show_email_alert(alert_message)
+                    if len(last_data) >= 4:
+                        p_plant = self.apply_calibration(1, last_data[1])
+                        p_storage = self.apply_calibration(0, last_data[0])
+                        if p_plant > 3.0 or p_storage > 9.0:
+                            now = datetime.now()
+                            date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                            subject = f"{date_str} Pressure is too high : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
+                            content = f"Plz check the Pressure. Pressure is too high at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
+                            print(f"[EMAIL] 압력 임계값 초과 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
+                            print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
+                            result, error_msg = send_mail(subject, content)
+                            if result:
+                                print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 초과 알림")
+                            else:
+                                print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 초과 알림")
+                                print(f"[EMAIL] 실패 원인: {error_msg}")
+                                alert_message = f"Failed to send pressure alert email"
+                                if error_msg:
+                                    alert_message += f"\n\nError: {error_msg}"
+                                self.show_email_alert(alert_message)
+                        if p_plant < 0.25:
+                            now = datetime.now()
+                            date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+                            subject = f"{date_str} Storage Pressure is too low : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
+                            content = f"Plz check the Pressure. Pressure is too low at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
+                            print(f"[EMAIL] 압력 임계값 미만 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
+                            print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
+                            result, error_msg = send_mail(subject, content)
+                            if result:
+                                print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 미만 알림")
+                            else:
+                                print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 미만 알림")
+                                print(f"[EMAIL] 실패 원인: {error_msg}")
+                                alert_message = f"Failed to send pressure alert email"
+                                if error_msg:
+                                    alert_message += f"\n\nError: {error_msg}"
+                                self.show_email_alert(alert_message)
                 except (IndexError, TypeError) as e:
                     print(f"Error checking pressure: {e}")
 
@@ -280,6 +317,100 @@ class PressureLevelPlotter:
         self.data_fetch_thread = threading.Thread(target=self.fetch_loop)
         self.data_fetch_thread.daemon = True
         self.data_fetch_thread.start()
+
+    def _load_config(self) -> dict:
+        """Load plotter_config.json.
+
+        Migrates from the legacy calibration.json if plotter_config.json does
+        not yet exist. Returns a dict with keys:
+            calibrations   : list[dict] — per-channel linear map params
+            channel_order  : list[int]  — display row → label index
+            channel_visible: list[bool] — per-label visibility
+        """
+        import copy
+        default_calibrations = copy.deepcopy(_CALIBRATION_DEFAULT)
+        default_order = [0, 1, 2, 3]
+        default_visible = [True, True, True, True]
+
+        config_path = _get_writable_path("plotter_config.json")
+        legacy_path = _get_writable_path("calibration.json")
+
+        # ── Migrate from legacy calibration.json ────────────────────────────
+        if not os.path.exists(config_path) and os.path.exists(legacy_path):
+            try:
+                with open(legacy_path, "r", encoding="utf-8") as f:
+                    legacy = json.load(f)
+                calibrations = self._parse_calibrations(legacy)
+                self._write_config(calibrations, default_order, default_visible)
+                os.remove(legacy_path)
+                print("[CONFIG] Migrated calibration.json → plotter_config.json")
+                return {
+                    "calibrations": calibrations,
+                    "channel_order": default_order,
+                    "channel_visible": default_visible,
+                }
+            except Exception as e:
+                print(f"[CONFIG] Migration failed: {e}")
+
+        # ── Load plotter_config.json ─────────────────────────────────────────
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            calibrations = self._parse_calibrations(data.get("calibrations", {}))
+            order = list(data.get("channel_order", default_order))
+            visible = [bool(v) for v in data.get("channel_visible", default_visible)]
+            if len(order) != 4:
+                order = default_order
+            if len(visible) != 4:
+                visible = default_visible
+            return {
+                "calibrations": calibrations,
+                "channel_order": order,
+                "channel_visible": visible,
+            }
+        except Exception:
+            return {
+                "calibrations": default_calibrations,
+                "channel_order": default_order,
+                "channel_visible": default_visible,
+            }
+
+    def _parse_calibrations(self, raw: dict) -> list[dict]:
+        result = []
+        for key in CHANNEL_KEYS:
+            entry = raw.get(key, {})
+            result.append({
+                "orig1":  float(entry.get("orig1",  0.0)),
+                "calib1": float(entry.get("calib1", 0.0)),
+                "orig2":  float(entry.get("orig2",  1.0)),
+                "calib2": float(entry.get("calib2", 1.0)),
+            })
+        return result
+
+    def _write_config(self, calibrations: list[dict], order: list[int], visible: list[bool]) -> None:
+        path = _get_writable_path("plotter_config.json")
+        data = {
+            "calibrations": {CHANNEL_KEYS[i]: calibrations[i] for i in range(4)},
+            "channel_order": order,
+            "channel_visible": visible,
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def _save_config(self) -> None:
+        try:
+            self._write_config(self.calibrations, self.last_positions, self.is_plot)
+        except Exception as e:
+            print(f"[ERROR] Failed to save plotter_config.json: {e}")
+
+    def apply_calibration(self, channel_index: int, raw: float) -> float:
+        cal = self.calibrations[channel_index]
+        orig1, calib1 = cal["orig1"], cal["calib1"]
+        orig2, calib2 = cal["orig2"], cal["calib2"]
+        if orig1 == orig2:
+            return raw
+        slope = (calib2 - calib1) / (orig2 - orig1)
+        return slope * raw + (calib1 - slope * orig1)
 
     def get_simulation_data(self):
         """테스트용 시뮬레이션 데이터 생성"""
@@ -429,9 +560,12 @@ class PressureLevelPlotter:
 
     def update_display(self):
         data_order = [2, 1, 0, 3]
+        last_raw = self.arduino_deque.get_last_data()
         for i, position in enumerate(self.last_positions):
             self.name_labels[i].config(text=self.label_name_unit_pairs[position][0])
-            self.value_labels[i].config(text=f": {self.arduino_deque.get_last_data()[data_order[position]]:.2f} {self.label_name_unit_pairs[position][1]}")
+            deque_ch = data_order[position]
+            calibrated = self.apply_calibration(deque_ch, last_raw[deque_ch])
+            self.value_labels[i].config(text=f": {calibrated:.2f} {self.label_name_unit_pairs[position][1]}")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
         self.arduino_status_label.config(text=f"{': Connected' if self.arduino_status_code == 200 else self.make_error_sentence(self.arduino_status_code)}")
 
@@ -467,23 +601,29 @@ class PressureLevelPlotter:
 
         marker_size = 3
 
+        # Build calibrated copies (raw deque → calibrated list, per channel)
+        calibrated = [
+            [self.apply_calibration(ch, v) for v in self.data_arduino_plot[ch]]
+            for ch in range(4)
+        ]
+
         # is_plot 설정에 따라 각 채널 플롯 여부 결정
-        # Volume (V_plant) - data_arduino_plot[2], label_name_unit_pairs[0]
-        if self.is_plot[0]:  # V_plant 채널이 활성화되어 있으면
-            self.ax.plot(self.time_arduino_plot, self.data_arduino_plot[2], marker='o', color='blue', label="Volume", markersize=marker_size)
+        # Volume (V_plant) - channel 2, label_name_unit_pairs[0]
+        if self.is_plot[0]:
+            self.ax.plot(self.time_arduino_plot, calibrated[2], marker='o', color='blue', label="Volume", markersize=marker_size)
 
         # Pressure 그래프들
-        # P_plant - data_arduino_plot[1], label_name_unit_pairs[1]
-        if self.is_plot[1]:  # P_plant 채널이 활성화되어 있으면
-            self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[1], marker='o', color='green', label="P_plant", markersize=marker_size)
+        # P_plant - channel 1, label_name_unit_pairs[1]
+        if self.is_plot[1]:
+            self.ax2.plot(self.time_arduino_plot, calibrated[1], marker='o', color='green', label="P_plant", markersize=marker_size)
 
-        # P_storage - data_arduino_plot[0], label_name_unit_pairs[2]
-        if self.is_plot[2]:  # P_storage 채널이 활성화되어 있으면
-            self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[0], marker='o', color='red', label="P_storage", markersize=marker_size)
+        # P_storage - channel 0, label_name_unit_pairs[2]
+        if self.is_plot[2]:
+            self.ax2.plot(self.time_arduino_plot, calibrated[0], marker='o', color='red', label="P_storage", markersize=marker_size)
 
-        # P_purifier - data_arduino_plot[3], label_name_unit_pairs[3]
-        if self.is_plot[3]:  # P_purifier 채널이 활성화되어 있으면
-            self.ax2.plot(self.time_arduino_plot, self.data_arduino_plot[3], marker='o', color='skyblue', label="P_purifier", markersize=marker_size)
+        # P_purifier - channel 3, label_name_unit_pairs[3]
+        if self.is_plot[3]:
+            self.ax2.plot(self.time_arduino_plot, calibrated[3], marker='o', color='skyblue', label="P_purifier", markersize=marker_size)
         ax2_color = 'red'
 
         self.ax.set_xlabel("")
@@ -501,35 +641,35 @@ class PressureLevelPlotter:
         # ax2의 y축 색상을 변경
         self.ax2.tick_params(axis='y', colors=ax2_color)
 
-        # 안전한 max_pressure 계산 (활성화된 채널만 고려)
+        # 안전한 max_pressure 계산 (calibrated, 활성화된 채널만 고려)
         try:
             pressure_values = []
-            if self.is_plot[1]:  # P_plant - label_name_unit_pairs[1]
-                pressure_values.extend(self.data_arduino_plot[1])
-            if self.is_plot[2]:  # P_storage - label_name_unit_pairs[2]
-                pressure_values.extend(self.data_arduino_plot[0])
-            if self.is_plot[3]:  # P_purifier - label_name_unit_pairs[3]
-                pressure_values.extend(self.data_arduino_plot[3])
+            if self.is_plot[1]:
+                pressure_values.extend(calibrated[1])
+            if self.is_plot[2]:
+                pressure_values.extend(calibrated[0])
+            if self.is_plot[3]:
+                pressure_values.extend(calibrated[3])
 
             if pressure_values:
                 max_pressure = max(10, max(pressure_values))
             else:
-                max_pressure = 10  # 활성화된 압력 채널이 없으면 기본값
+                max_pressure = 10
         except ValueError:
-            max_pressure = 10  # 기본값 사용
+            max_pressure = 10
             print("Warning: Could not calculate max_pressure, using default value")
 
         if self.enable_localmaxmin.get() == 1:
-            self.draw_local_maxmin(self.ax2, max_pressure)
+            self.draw_local_maxmin(self.ax2, max_pressure, calibrated)
 
-        # 안전한 y축 범위 설정 (활성화된 채널만 고려)
+        # 안전한 y축 범위 설정 (calibrated, 활성화된 채널만 고려)
         try:
-            if self.is_plot[0]:  # V_plant - label_name_unit_pairs[0]
-                max_volume = max(100, max(self.data_arduino_plot[2]))
+            if self.is_plot[0]:
+                max_volume = max(100, max(calibrated[2]))
             else:
-                max_volume = 100  # Volume 채널이 비활성화되어 있으면 기본값
+                max_volume = 100
         except ValueError:
-            max_volume = 100  # 기본값 사용
+            max_volume = 100
             print("Warning: Could not calculate max_volume, using default value")
 
         self.ax.set_ylim(0, max_volume)
@@ -598,33 +738,34 @@ class PressureLevelPlotter:
 
         return peaks
 
-    def draw_local_maxmin(self, ax, max_pressure):
-        # 데이터가 충분한지 확인
-        if len(self.data_arduino_plot[1]) < 10:  # 최소 데이터 포인트 필요
+    def draw_local_maxmin(self, ax, max_pressure, calibrated_data: list[list[float]]):
+        # 데이터가 충분한지 확인 (raw deque 길이 기준)
+        if len(self.data_arduino_plot[1]) < 10:
             return
 
-        # Find local maxima and minima for plant pressure
-        peaks = self.find_peaks(self.data_arduino_plot[1])
-        valleys = self.find_peaks([-x for x in self.data_arduino_plot[1]])  # Invert data to find minima
+        p_pl = calibrated_data[1]
+        p_st = calibrated_data[0]
 
-        for peak in peaks: # Annotate local maxima
-            if peak < len(self.time_arduino_plot) and peak < len(self.data_arduino_plot[1]) and peak < len(self.data_arduino_plot[0]):
-                ax.annotate(f'P_pl = {self.data_arduino_plot[1][peak]:.2f} psi\nP_st = {self.data_arduino_plot[0][peak]:.2f} psi',
-                                (self.time_arduino_plot[peak], min(self.data_arduino_plot[1][peak], max_pressure) - 1),
+        # Find local maxima and minima for plant pressure
+        peaks = self.find_peaks(p_pl)
+        valleys = self.find_peaks([-x for x in p_pl])
+
+        for peak in peaks:
+            if peak < len(self.time_arduino_plot) and peak < len(p_pl) and peak < len(p_st):
+                ax.annotate(f'P_pl = {p_pl[peak]:.2f} psi\nP_st = {p_st[peak]:.2f} psi',
+                                (self.time_arduino_plot[peak], min(p_pl[peak], max_pressure) - 1),
                                 textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
-                # vertical line
                 ax.plot([self.time_arduino_plot[peak], self.time_arduino_plot[peak]], [0, max_pressure], 'g--', alpha=0.5)
                 ax.annotate(f'{self.time_arduino_plot[peak].strftime("%H:%M:%S")}',
                                 (self.time_arduino_plot[peak], 0),
                                 textcoords="data", xytext=(self.time_arduino_plot[peak], -1),
                                 ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
 
-        for valley in valleys: # Annotate local minima
-            if valley < len(self.time_arduino_plot) and valley < len(self.data_arduino_plot[1]) and valley < len(self.data_arduino_plot[0]):
-                ax.annotate(f'P_pl = {self.data_arduino_plot[1][valley]:.2f} psi\nP_st = {self.data_arduino_plot[0][valley]:.2f} psi',
-                                (self.time_arduino_plot[valley], max(self.data_arduino_plot[1][valley], 0) + 1),
+        for valley in valleys:
+            if valley < len(self.time_arduino_plot) and valley < len(p_pl) and valley < len(p_st):
+                ax.annotate(f'P_pl = {p_pl[valley]:.2f} psi\nP_st = {p_st[valley]:.2f} psi',
+                                (self.time_arduino_plot[valley], max(p_pl[valley], 0) + 1),
                                 textcoords="data", ha='left', color='green', alpha=0.8, fontweight='bold')
-                # vertical line
                 ax.plot([self.time_arduino_plot[valley], self.time_arduino_plot[valley]], [0, max_pressure], 'g--', alpha=0.5)
                 ax.annotate(f'{self.time_arduino_plot[valley].strftime("%H:%M:%S")}',
                                 (self.time_arduino_plot[valley], 0),
@@ -632,15 +773,14 @@ class PressureLevelPlotter:
                                 ha='right', color='green', alpha=0.8, fontweight='bold', rotation=30)
 
         # Find local maxima and minima for storage pressure
-        peaks = self.find_peaks(self.data_arduino_plot[0])
-        valleys = self.find_peaks([-x for x in self.data_arduino_plot[0]])
+        peaks = self.find_peaks(p_st)
+        valleys = self.find_peaks([-x for x in p_st])
 
         for peak in peaks:
-            if peak < len(self.time_arduino_plot) and peak < len(self.data_arduino_plot[1]) and peak < len(self.data_arduino_plot[0]):
-                ax.annotate(f'P_pl = {self.data_arduino_plot[1][peak]:.2f} psi\nP_st = {self.data_arduino_plot[0][peak]:.2f} psi',
-                                (self.time_arduino_plot[peak], min(self.data_arduino_plot[0][peak], max_pressure) - 1),
+            if peak < len(self.time_arduino_plot) and peak < len(p_pl) and peak < len(p_st):
+                ax.annotate(f'P_pl = {p_pl[peak]:.2f} psi\nP_st = {p_st[peak]:.2f} psi',
+                                (self.time_arduino_plot[peak], min(p_st[peak], max_pressure) - 1),
                                 textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
-                # vertical line
                 ax.plot([self.time_arduino_plot[peak], self.time_arduino_plot[peak]], [0, max_pressure], 'r--', alpha=0.5)
                 ax.annotate(f'{self.time_arduino_plot[peak].strftime("%H:%M:%S")}',
                                 (self.time_arduino_plot[peak], 0),
@@ -648,11 +788,10 @@ class PressureLevelPlotter:
                                 ha='right', color='red', alpha=0.8, fontweight='bold', rotation=30)
 
         for valley in valleys:
-            if valley < len(self.time_arduino_plot) and valley < len(self.data_arduino_plot[1]) and valley < len(self.data_arduino_plot[0]):
-                ax.annotate(f'P_pl = {self.data_arduino_plot[1][valley]:.2f} psi\nP_st = {self.data_arduino_plot[0][valley]:.2f} psi',
-                                (self.time_arduino_plot[valley], max(self.data_arduino_plot[0][valley], 0) + 1),
+            if valley < len(self.time_arduino_plot) and valley < len(p_pl) and valley < len(p_st):
+                ax.annotate(f'P_pl = {p_pl[valley]:.2f} psi\nP_st = {p_st[valley]:.2f} psi',
+                                (self.time_arduino_plot[valley], max(p_st[valley], 0) + 1),
                                 textcoords="data", ha='left', color='red', alpha=0.8, fontweight='bold')
-                # vertical line
                 ax.plot([self.time_arduino_plot[valley], self.time_arduino_plot[valley]], [0, max_pressure], 'r--', alpha=0.5)
                 ax.annotate(f'{self.time_arduino_plot[valley].strftime("%H:%M:%S")}',
                                 (self.time_arduino_plot[valley], 0),
@@ -719,26 +858,22 @@ class PressureLevelPlotter:
             print(f"[ERROR] autofmt_xdate() 에러: {e}")
 
     def save_log(self, time: datetime, arduino_data):
-        # 로그 폴더 경로 설정
+        # Apply calibration before logging
+        cal = [self.apply_calibration(i, arduino_data[i]) for i in range(4)]
+
         log_dir = "log_pressurelevel"
 
-        # 현재 날짜에 맞는 폴더 경로 설정
         year = time.strftime('%Y')
         month = time.strftime('%m')
         day = time.strftime('%d')
 
-        # 연도/월 폴더 경로
         year_month_dir = os.path.join(log_dir, year, month)
-
-        # 폴더가 없으면 생성
         os.makedirs(year_month_dir, exist_ok=True)
 
-        # 날짜에 해당하는 로그 파일 경로
         log_file_path = os.path.join(year_month_dir, f"{day}.txt")
 
-        # 로그 파일에 데이터 추가
         with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {arduino_data[2]:.2f} L, {arduino_data[1]:.2f} psi, {arduino_data[0]:.2f} psi, {arduino_data[3]:.2f} psi\n")
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {cal[2]:.2f} L, {cal[1]:.2f} psi, {cal[0]:.2f} psi, {cal[3]:.2f} psi\n")
 
     def open_setting(self):
         """
@@ -751,35 +886,17 @@ class PressureLevelPlotter:
         """
         PressureLevelSetting 클래스로부터 반환받은 positions을 이 클래스에 적용합니다.
         """
-        print("=== 메인 창 - 위치 정보 적용 ===")
-        print(f"이전 last_positions: {self.last_positions}")
-        print(f"새로운 positions: {positions}")
-        print("위치 변경 상세:")
-        for i, (old_pos, new_pos) in enumerate(zip(self.last_positions, positions)):
-            old_label = self.label_name_unit_pairs[old_pos][0]
-            new_label = self.label_name_unit_pairs[new_pos][0]
-            print(f"  행 {i}: {old_label} → {new_label}")
-        print("=============================")
-
         self.last_positions = positions
         self.update_display()
+        self._save_config()
 
     def update_is_plot(self, is_plot) -> None:
-
         """
         PressureLevelSetting 클래스로부터 반환받은 is_plot을 이 클래스에 적용합니다.
         """
-        print("=== 메인 창 - 플롯 설정 적용 ===")
-        print(f"이전 is_plot: {self.is_plot}")
-        print(f"새로운 is_plot: {is_plot}")
-        print("플롯 설정 변경 상세:")
-        for i, (old_plot, new_plot) in enumerate(zip(self.is_plot, is_plot)):
-            label = self.label_name_unit_pairs[i][0]
-            print(f"  {label}: {'표시' if old_plot else '숨김'} → {'표시' if new_plot else '숨김'}")
-        print("=============================")
-
         self.is_plot = is_plot
-        
+        self._save_config()
+
         # 설정 변경 시 즉시 플롯 업데이트
         if len(self.time_arduino_plot) > 2:
             self.update_plot()
