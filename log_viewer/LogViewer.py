@@ -180,11 +180,11 @@ class LogViewer:
             widget.destroy()
 
     def is_valid_pressure_level_log(self, log_line):
-        pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}: -?\d+\.\d{2} [VL], -?\d+\.\d{2} psi, -?\d+\.\d{2} psi$'
+        pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}: -?\d+\.\d{2} [VL], -?\d+\.\d{2} psi, -?\d+\.\d{2} psi, -?\d+\.\d{2} psi$'
         return re.match(pattern, log_line) is not None
 
     def is_valid_flow_temperature_log(self, log_line):
-        pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}: -?\d+\.\d{2} L/min, -?\d+\.\d{2} L/min, -?\d+\.\d{2} L/min, -?\d+\.\d{2} K, -?\d+\.\d{2} K$'
+        pattern = r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}: -?\d+\.\d{2}, -?\d+\.\d{2}, -?\d+\.\d{2}, -?\d+\.\d{2}, -?\d+\.\d{2}, -?\d+\.\d{2}$'
         return re.match(pattern, log_line) is not None
 
     def check_file(self, file):
@@ -329,22 +329,25 @@ class LogViewer:
         volume = []
         plant_pressure = []
         storage_pressure = []
+        purifier_pressure = []
 
         for logfile in self.log_files:
             with open(logfile.file_path, 'r') as f:
                 for line in f:
                     date, data = line.split(': ')
-                    level, pressure1, pressure2 = data.split(', ')
+                    level, pressure1, pressure2, pressure3 = data.split(', ')
                     datetimes.append(datetime.strptime(date, "%Y-%m-%d %H:%M:%S"))
                     volume.append(float(level.split()[0]))
                     plant_pressure.append(float(pressure1.split()[0]))
                     storage_pressure.append(float(pressure2.split()[0]))
-        
+                    purifier_pressure.append(float(pressure3.split()[0]))
+
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()
         ax1.plot(datetimes, volume, 'b-', label='Volume')
         ax2.plot(datetimes, plant_pressure, 'g-', label=f'P_plant')
         ax2.plot(datetimes, storage_pressure, 'r-', label=f'P_storage')
+        # ax2.plot(datetimes, purifier_pressure, 'skyblue', label=f'P_purifier')
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Volume')
         ax2.set_ylabel('Pressure', color='r')
@@ -359,6 +362,7 @@ class LogViewer:
         tip_flow = []
         shield_flow = []
         bypass_flow = []
+        pumping_flow = []
         head_temperature = []
         coldtip_temperature = []
 
@@ -366,11 +370,12 @@ class LogViewer:
             with open(logfile.file_path, 'r') as f:
                 for line in f:
                     date, data = line.split(': ')
-                    flow1, flow2, flow3, temperature1, temperature2 = data.split(', ')
+                    flow1, flow2, flow3, flow4, temperature1, temperature2 = data.split(', ')
                     datetimes.append(datetime.strptime(date, "%Y-%m-%d %H:%M:%S"))
                     tip_flow.append(float(flow1.split()[0]))
                     shield_flow.append(float(flow2.split()[0]))
                     bypass_flow.append(float(flow3.split()[0]))
+                    pumping_flow.append(float(flow4.split()[0]))
                     head_temperature.append(float(temperature1.split()[0]))
                     coldtip_temperature.append(float(temperature2.split()[0]))
         
@@ -379,6 +384,7 @@ class LogViewer:
         ax1.plot(datetimes, tip_flow, 'g-', label='Tip Flow')
         ax1.plot(datetimes, shield_flow, 'b-', label='Shield Flow')
         ax1.plot(datetimes, bypass_flow, 'p-', label='Bypass Flow')
+        ax1.plot(datetimes, pumping_flow, 's-', label='Pumping Flow')
         ax2.plot(datetimes, head_temperature, 'r-', label='Head Temperature')
         ax2.plot(datetimes, coldtip_temperature, 'y-', label='Coldtip Temperature')
         ax1.set_xlabel('Time')
@@ -400,6 +406,7 @@ class LogViewer:
         tip_flow = []
         shield_flow = []
         bypass_flow = []
+        pumping_flow = []
         head_temperature = []
         coldtip_temperature = []
 
@@ -417,11 +424,12 @@ class LogViewer:
                 with open(logfile.file_path, 'r') as f:
                     for line in f:
                         date, data = line.split(': ')
-                        flow1, flow2, flow3, temperature1, temperature2 = data.split(', ')
+                        flow1, flow2, flow3, flow4, temperature1, temperature2 = data.split(', ')
                         datetimes_flowtemp.append(datetime.strptime(date, "%Y-%m-%d %H:%M:%S"))
                         tip_flow.append(float(flow1.split()[0]))
                         shield_flow.append(float(flow2.split()[0]))
                         bypass_flow.append(float(flow3.split()[0]))
+                        pumping_flow.append(float(flow4.split()[0]))
                         head_temperature.append(float(temperature1.split()[0]))
                         coldtip_temperature.append(float(temperature2.split()[0]))
         
@@ -445,6 +453,7 @@ class LogViewer:
         ax2.plot(datetimes_flowtemp, tip_flow, 'g-', label='Tip Flow')
         ax2.plot(datetimes_flowtemp, shield_flow, 'b-', label='Shield Flow')
         ax2.plot(datetimes_flowtemp, bypass_flow, 'p-', label='Bypass Flow')
+        ax2.plot(datetimes_flowtemp, pumping_flow, 's-', label='Pumping Flow')
         ax4.plot(datetimes_flowtemp, head_temperature, 'r-', label='Head Temperature')
         ax4.plot(datetimes_flowtemp, coldtip_temperature, 'y-', label='Coldtip Temperature')
         ax2.set_xlabel('Time')

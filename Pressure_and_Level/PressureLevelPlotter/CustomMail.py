@@ -1,76 +1,232 @@
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import smtplib
+import json
+import os
+import sys
 from datetime import datetime
+from typing import Optional
+import re
 
 
-def send_mail(subject, content):
+def resource_path(relative_path):
+    """
+    Get absolute path to resource, works for dev and for PyInstaller.
+    For PyInstaller: Returns path relative to exe file location.
+    For dev: Returns path relative to script location.
+    """
     try:
-        # 파일 읽기
-        with open('sender.txt', 'r') as f:
-            lines = f.readlines()
+        # Check if running as PyInstaller bundle
+        if getattr(sys, 'frozen', False):
+            # PyInstaller: Use exe file directory, not temp folder
+            # sys.executable points to the exe file location
+            base_path = os.path.dirname(sys.executable)
+        else:
+            # Development: Use script directory
+            base_path = os.path.abspath(os.path.dirname(__file__))
+    except Exception:
+        # Fallback: Use current working directory
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
 
-        # 이메일 정보 설정
-        for line in lines:
-            if 'SMTP_SERVER' in line:
-                SMTP_SERVER = line.split(',')[1].strip()
-            elif 'SMTP_PORT' in line:
-                SMTP_PORT = int(line.split(',')[1].strip())  # 포트는 정수로 변환
-            elif 'SMTP_USER' in line:
-                SMTP_USER = line.split(',')[1].strip()
-            elif 'SMTP_PASSWORD' in line:
-                SMTP_PASSWORD = line.split(',')[1].strip()
 
-        print('SMTP_SERVER :', SMTP_SERVER)
-        print('SMTP_PORT :', SMTP_PORT)
-        print('SMTP_USER :', SMTP_USER)
-        print('SMTP_PASSWORD :', SMTP_PASSWORD)
-
-        # 보내는 이 정보
-        SENDER = SMTP_USER
-
-        # 받는 이 주소
-        with open('recipent.txt', 'r') as f:
-            RECIPIENT = f.readlines()
-    except:
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open('maillog.txt', 'a') as file:
-            # 한 줄의 로그 작성
-            log_message = f'[{current_time}] 이메일 발신자/수신자 목록을 불러오는 데에 실패했습니다.\n'
-            file.write(log_message)
-
+def write_log(message: str, log_file: str = "maillog.txt"):
+    """
+    Write log message to log file.
+    
+    Args:
+        message: Log message to write
+        log_file: Log file name (default: maillog.txt)
+    """
     try:
-        # 이메일 제목  = 현재 날짜 정보
-        now = datetime.now()
-        date_str = now.strftime("%Y-%m-%d %H:%M:%S")
-        SUBJECT = f"{date_str} Plant is disconnected."
-
-        # 이메일 내용
-        contents = f"Plz check the Plant. Plant is disconnected at {date_str}."
-
-        # 이메일 생성
-        msg = MIMEMultipart()
-        msg['Subject'] = SUBJECT
-        msg['From'] = SENDER
-        msg['To'] = ','.join(RECIPIENT)
-        msg.attach(MIMEText(contents))
-    except:
+        log_path = resource_path(log_file)
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open('log.txt', 'a') as file:
-            # 한 줄의 로그 작성
-            log_message = f'[{current_time}] 이메일 객체를 생성하는 데에 실패했습니다.\n'
+        log_message = f'[{current_time}] {message}\n'
+        with open(log_path, 'a', encoding='utf-8') as file:
             file.write(log_message)
+    except Exception as e:
+        # If logging fails, print to console as fallback
+        print(f"Failed to write log: {e}")
 
+
+def validate_email(email: str) -> bool:
+    """
+    Validate email address format.
+    
+    Args:
+        email: Email address to validate
+        
+    Returns:
+        True if valid, False otherwise
+    """
+    if not email or not isinstance(email, str):
+        return False
+    
+    # Remove whitespace
+    email = email.strip()
+    
+    # Basic email regex pattern
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email))
+
+
+def load_config() -> dict:
+    """
+    Load email configuration from JSON file.
+    
+    Returns:
+        Dictionary containing SMTP settings and recipient list
+        
+    Raises:
+        FileNotFoundError: If config file is not found
+        json.JSONDecodeError: If config file is invalid JSON
+        KeyError: If required keys are missing
+    """
+    config_path = resource_path("mail_config.json")
+    
     try:
-        # SMTP 서버 연결 및 이메일 전송
-        smtp_server = smtplib.SMTP_SSL(host=SMTP_SERVER, port=SMTP_PORT)
-        smtp_server.login(SMTP_USER, SMTP_PASSWORD)
-        for reciever in RECIPIENT:
-            smtp_server.sendmail(SENDER, reciever, msg.as_string())
-        smtp_server.quit()
-    except:
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with open('log.txt', 'a') as file:
-            # 한 줄의 로그 작성
-            log_message = f'[{current_time}] 이메일을 보내는 도중 오류가 발생했습니다.\n'
-            file.write(log_message)
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        write_log("Email configuration file not found. Please create mail_config.json")
+        raise
+    except json.JSONDecodeError as e:
+        write_log(f"Invalid JSON format in mail_config.json: {e}")
+        raise
+    
+    # Validate required keys
+    required_keys = ['smtp_server', 'smtp_port', 'smtp_user', 'smtp_password', 'recipients']
+    missing_keys = [key for key in required_keys if key not in config]
+    if missing_keys:
+        write_log(f"Missing required keys in mail_config.json: {', '.join(missing_keys)}")
+        raise KeyError(f"Missing required keys: {', '.join(missing_keys)}")
+    
+    # Validate recipients
+    if not isinstance(config['recipients'], list) or len(config['recipients']) == 0:
+        write_log("Recipients list is empty or invalid")
+        raise ValueError("Recipients list must be a non-empty list")
+    
+    return config
+
+
+def create_email_message(sender: str, recipients: list, subject: str, content: str, sender_name: Optional[str] = None) -> MIMEMultipart:
+    """
+    Create email message object.
+    
+    Args:
+        sender: Sender email address
+        recipients: List of recipient email addresses
+        subject: Email subject
+        content: Email content
+        sender_name: Optional sender display name
+        
+    Returns:
+        MIMEMultipart message object
+        
+    Raises:
+        ValueError: If email addresses are invalid
+    """
+    # Validate sender
+    if not validate_email(sender):
+        raise ValueError(f"Invalid sender email address: {sender}")
+    
+    # Validate recipients
+    invalid_recipients = [r for r in recipients if not validate_email(r)]
+    if invalid_recipients:
+        raise ValueError(f"Invalid recipient email addresses: {', '.join(invalid_recipients)}")
+    
+    # Format From field with optional sender name
+    if sender_name and sender_name.strip():
+        from_field = f"{sender_name.strip()} <{sender}>"
+    else:
+        from_field = sender
+    
+    # Create message
+    msg = MIMEMultipart()
+    msg['Subject'] = subject
+    msg['From'] = from_field
+    msg['To'] = ', '.join(recipients)
+    msg.attach(MIMEText(content, 'plain', 'utf-8'))
+    
+    return msg
+
+
+def send_mail(subject: str, content: str) -> tuple[bool, Optional[str]]:
+    """
+    Send email using SMTP.
+    
+    Args:
+        subject: Email subject (will be used as provided)
+        content: Email content (will be used as provided)
+        
+    Returns:
+        Tuple of (success: bool, error_message: Optional[str])
+        - If successful: (True, None)
+        - If failed: (False, error_message)
+    """
+    try:
+        # Load configuration
+        config = load_config()
+        
+        smtp_server = config['smtp_server']
+        smtp_port = config['smtp_port']
+        smtp_user = config['smtp_user']
+        smtp_password = config['smtp_password']
+        sender_name = config.get('sender_name', None)  # Optional field
+        
+        # Process recipients: handle multiple recipients safely
+        recipients = []
+        for r in config['recipients']:
+            # Skip None or non-string values
+            if r is None:
+                continue
+            if not isinstance(r, str):
+                write_log(f"Warning: Skipping invalid recipient type: {type(r).__name__}")
+                continue
+            
+            # Clean and process string recipient
+            cleaned = r.strip().replace('\n', '').replace('\r', '')
+            if cleaned:  # Only add non-empty strings
+                recipients.append(cleaned)
+        
+        # Validate recipients after cleaning
+        if not recipients:
+            error_msg = "No valid recipients found after processing"
+            write_log(error_msg)
+            return False, error_msg
+        
+        # Log configuration (without password)
+        log_message = f"SMTP Server: {smtp_server}, Port: {smtp_port}, User: {smtp_user}"
+        if sender_name:
+            log_message += f", Sender Name: {sender_name}"
+        write_log(log_message)
+        
+        # Create email message
+        msg = create_email_message(smtp_user, recipients, subject, content, sender_name)
+        
+        # Send email using context manager for proper resource cleanup
+        with smtplib.SMTP_SSL(host=smtp_server, port=smtp_port) as smtp_conn:
+            smtp_conn.login(smtp_user, smtp_password)
+            for recipient in recipients:
+                smtp_conn.sendmail(smtp_user, recipient, msg.as_string())
+        
+        write_log(f"Email sent successfully to {len(recipients)} recipient(s)")
+        return True, None
+        
+    except FileNotFoundError as e:
+        error_msg = f"Configuration file not found: {e}"
+        write_log(error_msg)
+        return False, error_msg
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        error_msg = f"Configuration error: {e}"
+        write_log(error_msg)
+        return False, error_msg
+    except smtplib.SMTPException as e:
+        error_msg = f"SMTP error occurred while sending email: {e}"
+        write_log(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"Unexpected error occurred while sending email: {e}"
+        write_log(error_msg)
+        return False, error_msg

@@ -188,18 +188,18 @@ class FlowTempPlotter:
 
         expected_exc_delay = 0.2
         if loop_start_time - self.rfm_deque.get_last_time().timestamp() < expected_exc_delay:
-            if self.get_interval() == 1:
+            if self.get_interval() == Interval.ONE_SECOND:
                 self.update_plot()
 
         if loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < expected_exc_delay:
-            if self.get_interval() == 60:
+            if self.get_interval() == Interval.ONE_MINUTE:
                 self.update_plot()
             self.save_log(self.rfm_deque.get_last_1min_time(), self.rfm_deque.get_last_data(), self.drc91c_deque.get_last_data())
 
         if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay:
-            if self.get_interval() == 600:
+            if self.get_interval() == Interval.TEN_MINUTES:
                 self.update_plot()
-            GOOD_STATUS = 200
+            GOOD_STATUS = "200"
             if self.rfm_status_code != GOOD_STATUS and self.enable_rfm.get():
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
@@ -214,7 +214,7 @@ class FlowTempPlotter:
                 send_mail(subject, contents)
 
         if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
-            if self.get_interval() == 3600:
+            if self.get_interval() == Interval.ONE_HOUR:
                 self.update_plot()
 
         loop_end_time = time.time()
@@ -265,7 +265,7 @@ class FlowTempPlotter:
             return [0, 0, 0, 0]
         try:
             response = requests.get(f"http://127.0.0.1:{self.rfm_localserver_port}/get_value", timeout=1)
-            self.rfm_status_code = response.status_code
+            self.rfm_status_code = str(response.status_code)
             if response.status_code != 200:
                 print(f"Error fetching from RFM: {response.status_code}")
                 return [0, 0, 0, 0]
@@ -307,7 +307,7 @@ class FlowTempPlotter:
             return [0, 0]
         try:
             response = requests.get(f"http://127.0.0.1:{self.drc91c_localserver_port}/sensor_pair", timeout=1)
-            self.drc91c_status_code = response.status_code
+            self.drc91c_status_code = str(response.status_code)
             if response.status_code != 200:
                 print(f"Error fetching from DRC91C: {response.status_code}")
                 return [0, 0]
@@ -346,22 +346,22 @@ class FlowTempPlotter:
         values_drc91c = self.get_data_from_drc91c()
         self.drc91c_deque.update_data(values_drc91c, time.time())
 
-    def get_interval(self) -> int:
+    def get_interval(self) -> Interval:
         """Get the current interval for data plotting.
 
         Returns:
-            int: The interval in seconds.
+            Interval: The interval.
         """
         interval_str = self.interval_combo.get()
         if interval_str == "1 s":
-            return 1
+            return Interval.ONE_SECOND
         elif interval_str == "1 min":
-            return 60
+            return Interval.ONE_MINUTE
         elif interval_str == "10 min":
-            return 600
+            return Interval.TEN_MINUTES
         elif interval_str == "1 hour":
-            return 3600
-        return 1
+            return Interval.ONE_HOUR
+        raise ValueError("Invalid interval")
 
     def make_error_sentence(self, error_code: str) -> str:
         """Create an error sentence based on the error code.
@@ -373,7 +373,7 @@ class FlowTempPlotter:
             str: The error sentence.
         """
         try:
-            error_code = int(error_code)
+            error_code = str(error_code)
             return f": Err({error_code})"
         except ValueError:
             return f": {error_code}"
@@ -387,8 +387,8 @@ class FlowTempPlotter:
         self.head_data_label.config(text=f": {self.drc91c_deque.get_last_data()[0]:.2f} K")
         self.cold_tip_data_label.config(text=f": {self.drc91c_deque.get_last_data()[1]:.2f} K")
         self.current_time_label.config(text=f": {datetime.now().strftime('%H:%M:%S')}")
-        self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == 200 else self.make_error_sentence(self.rfm_status_code)}")
-        self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == 200 else self.make_error_sentence(self.drc91c_status_code)}")
+        self.rfm_status_label.config(text=f"{': Connected' if self.rfm_status_code == '200' else self.make_error_sentence(self.rfm_status_code)}")
+        self.drc91c_status_label.config(text=f"{': Connected' if self.drc91c_status_code == '200' else self.make_error_sentence(self.drc91c_status_code)}")
 
     def update_plot(self):
         """Update the plot with the latest data."""
@@ -450,20 +450,24 @@ class FlowTempPlotter:
         self.ax.margins(x=0.1, y=0.5)
         self.ax2.margins(x=0.1, y=0.5)
 
-    def update_xformatter(self, interval: int):
+    def update_xformatter(self, interval: Interval):
         """Update the x-axis formatter based on the interval.
 
         Args:
-            interval (int): The interval in seconds.
+            interval (Interval): The interval.
         """
         def format_date(x, pos=None):
             date = mdates.num2date(x)
-            if interval == 1:
+            if interval == Interval.ONE_SECOND:
                 return date.strftime("%H:%M:%S")
-            elif interval == 3600:
-                return date.strftime("%m-%d %H:%M")
-            else:
+            elif interval == Interval.ONE_MINUTE:
                 return date.strftime("%H:%M")
+            elif interval == Interval.TEN_MINUTES:
+                return date.strftime("%m-%d %H:%M")
+            elif interval == Interval.ONE_HOUR:
+                return date.strftime("%m-%d %H")
+            else:
+                raise ValueError("Invalid interval")
 
         locator = CustomDateLocator(interval)
         formatter = ticker.FuncFormatter(format_date)
@@ -503,7 +507,7 @@ class FlowTempPlotter:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {rfm_data[3]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
 
 
-def open_config_file(file_path: str) -> (int, int):
+def open_config_file(file_path: str) -> tuple[int, int]:
     """Open and parse the configuration file.
 
     Args:

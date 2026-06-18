@@ -550,6 +550,9 @@ if __name__ == "__main__":
     import threading
     from http.server import HTTPServer, SimpleHTTPRequestHandler
     
+    # Initialize rfmapp as None
+    rfmapp = None
+    
     config_file_path = "rfm_config.json"
     # If loading fails, create a default config.json.
     try:
@@ -563,6 +566,11 @@ if __name__ == "__main__":
     class RFMHandler(SimpleHTTPRequestHandler):
         def do_GET(self):
             if self.path == '/get_value':
+                # Check if rfmapp is initialized
+                if 'rfmapp' not in globals() or rfmapp is None:
+                    self.send_error(404, "Application not ready")
+                    return
+                
                 self.send_response(200)
                 self.send_header('Content-type', 'application/json')
                 self.end_headers()
@@ -582,16 +590,28 @@ if __name__ == "__main__":
         master = tk.Tk()
         master.iconbitmap(resource_path("MFC.ico"))
         global rfmapp
-        rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
-        rfmapp.master.mainloop()
+        try:
+            rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
+            rfmapp.master.mainloop()
+        except Exception as e:
+            print(f"Application error: {e}")
+            rfmapp = None
 
     def run_server():
-        server = HTTPServer(('0.0.0.0', localserver_port), RFMHandler)
-        server.serve_forever()
+        try:
+            server = HTTPServer(('localhost', localserver_port), RFMHandler)
+            print(f"HTTP Server started on localhost:{localserver_port}")
+            server.serve_forever()
+        except Exception as e:
+            print(f"Server error: {e}")
 
     # Start HTTP server in a separate thread
     server_thread = threading.Thread(target=run_server)
     server_thread.daemon = True
     server_thread.start()
+    
+    # Wait a moment for server to start
+    import time
+    time.sleep(1)
 
     run_app(arduino_port, pc_input_max, arduino_read_max)

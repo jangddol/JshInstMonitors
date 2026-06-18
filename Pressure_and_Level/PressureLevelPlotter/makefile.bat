@@ -1,0 +1,1 @@
+python3 -m PyInstaller --onefile --noconsole -n=PressureLevelPlotter --icon=.\PressureLevelPlotter.ico --add-data "PressureLevelPlotter.ico;." .\PressureLevelPlotter.py
