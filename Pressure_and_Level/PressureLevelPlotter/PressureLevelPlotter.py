@@ -976,6 +976,19 @@ class PressureLevelPlotter:
             import traceback
             traceback.print_exc()
 
+    def _on_close(self) -> None:
+        """Handle window close: clean up matplotlib then force-exit.
+
+        plt.close('all') must be called before root.destroy() to prevent
+        matplotlib's atexit handler from trying to access the already-destroyed
+        tkinter root, which causes the process to hang (especially in
+        PyInstaller --noconsole builds).  os._exit() then bypasses the rest of
+        Python's shutdown sequence entirely, guaranteeing the process exits.
+        """
+        plt.close('all')
+        self.master.destroy()
+        os._exit(0)
+
     def show_email_alert(self, message: str):
         """
         Show non-modal window for email alert failure notification.
@@ -1057,4 +1070,5 @@ if __name__ == "__main__":
     root.iconbitmap(resource_path("PressureLevelPlotter.ico"))
     app = PressureLevelPlotter(root)
     app.start()
+    root.protocol("WM_DELETE_WINDOW", app._on_close)
     root.mainloop()
