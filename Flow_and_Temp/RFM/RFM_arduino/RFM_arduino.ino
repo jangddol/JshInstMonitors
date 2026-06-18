@@ -27,8 +27,8 @@ const char NUMBER_COMMANDS[10] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '
 const char RESET_COMMAND = 'B';
 
 // pin assignment
-const int FLOW_STATE_CH[NUM_CHANNELS] = {2, 7, 8, 13};    // STM1 : 2,7,8,13 ; STM3 : 2,3,4,7
-const int FLOW_SETPOINT_CH[NUM_CHANNELS] = {3, 5, 9, 11}; // STM1 : 3,5,9,11 ; STM3 : 10,8,13,5
+const int FLOW_STATE_CH[NUM_CHANNELS] = {2, 3, 4, 7};    // STM1 : 2,7,8,13 ; STM3 : 2,3,4,7
+const int FLOW_SETPOINT_CH[NUM_CHANNELS] = {10, 8, 13, 5}; // STM1 : 3,5,9,11 ; STM3 : 10,8,13,5
 const int FLOW_MEAS_CH[NUM_CHANNELS] = {A0, A1, A2, A3};
 
 int set_values[4] = {0, 0, 0, 0}; // setpoint value를 저장해놓는 배열
@@ -37,8 +37,8 @@ char MeasureBuffer[35];
 
 void resetMeasureBuffer()
 {
-    memset(MeasureBuffer, '0', 34); // MeasureBuffer의 처음 34바이트를 '0'으로 설정
-    MeasureBuffer[34] = '\0';       // null 종료 문자 추가
+    memset(MeasureBuffer, '0', sizeof(MeasureBuffer) - 1); // Ensure all but the last byte are '0'
+    MeasureBuffer[sizeof(MeasureBuffer) - 1] = '\0';       // Null-terminate the string
 }
 
 int getIndexInArray(const char arr[], int size, int element)

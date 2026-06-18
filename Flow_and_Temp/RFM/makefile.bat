@@ -1,0 +1,1 @@
+python3.exe -m PyInstaller --onefile -n=MKS247Creceiver --icon=.\MFC.ico --add-data "MFC.ico;." --hidden-import=threading --hidden-import=http.server --hidden-import=socketserver .\RFMdaemon.py

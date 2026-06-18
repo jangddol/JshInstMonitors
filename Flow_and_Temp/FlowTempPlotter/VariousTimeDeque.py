@@ -67,14 +67,14 @@ class VariousTimeDeque:
             for i in range(self.numdata):
                 self.data_1hour[i].append(data[i])
 
-    def get_time_deque(self, interval: Interval) -> Union[Deque[datetime], None]:
+    def get_time_deque(self, interval: Interval) -> Deque[datetime]:
         """Retrieve the time deque for the specified interval.
 
         Args:
             interval (Interval): The interval as an Enum (ONE_SECOND, ONE_MINUTE, TEN_MINUTES, ONE_HOUR).
 
         Returns:
-            Union[Deque[datetime], None]: The corresponding time deque or None if invalid interval.
+            Deque[datetime]: The corresponding time deque.
         """
         if interval == Interval.ONE_SECOND:
             return self.time_1s
@@ -84,16 +84,17 @@ class VariousTimeDeque:
             return self.time_10min
         elif interval == Interval.ONE_HOUR:
             return self.time_1hour
-        return None
-    
-    def get_data_deque(self, interval: Interval) -> Union[List[Deque[float]], None]:
+        else:
+            raise ValueError("Invalid interval")
+
+    def get_data_deque(self, interval: Interval) -> List[Deque[float]]:
         """Retrieve the data deque for the specified interval.
 
         Args:
             interval (Interval): The interval as an Enum (ONE_SECOND, ONE_MINUTE, TEN_MINUTES, ONE_HOUR).
 
         Returns:
-            Union[List[Deque[float]], None]: The corresponding data deque or None if invalid interval.
+            List[Deque[float]]: The corresponding data deque.
         """
         if interval == Interval.ONE_SECOND:
             return self.data_1s
@@ -103,7 +104,8 @@ class VariousTimeDeque:
             return self.data_10min
         elif interval == Interval.ONE_HOUR:
             return self.data_1hour
-        return None
+        else:
+            raise ValueError("Invalid interval")
     
     def get_last_time(self) -> datetime:
         return self.time_1s[-1]
