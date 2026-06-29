@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -19,10 +20,14 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from CalibrationWindow import CalibrationWindow, CHANNEL_KEYS
 from CustomDateLocator import CustomDateLocator
 from PressureLevelSetting import PressureLevelSetting
-from VariousTimeDeque import VariousTimeDeque, Interval
+from VariousTimeDeque import VariousTimeDeque, Interval, MAXLEN
 from CustomMail import send_mail
 
-MAXLEN = 100
+_LOG_DIR = "log_pressurelevel"
+_LOG_LINE_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}): "
+    r"(-?\d+\.\d{2}) L, (-?\d+\.\d{2}) psi, (-?\d+\.\d{2}) psi, (-?\d+\.\d{2}) psi$"
+)
 
 # 테스트 모드 설정 (True로 설정하면 시뮬레이션 데이터 사용)
 IS_TEST = False
@@ -75,7 +80,15 @@ class PressureLevelPlotter:
         self.last_positions = _config["channel_order"]
         self.is_plot = _config["channel_visible"]
 
+        loaded_count = self._load_history_from_logs()
+        if loaded_count == 0:
+            self.arduino_deque.update_data([0] * 4, time.time())
+        else:
+            print(f"[LOG] Restored {loaded_count} log record(s) into plot buffers")
+
         self.update_interval(None)
+        if len(self.time_arduino_plot) > 2:
+            self.update_plot()
         self.main_loop()
 
     def create_widgets(self) -> None:
@@ -411,6 +424,88 @@ class PressureLevelPlotter:
             return raw
         slope = (calib2 - calib1) / (orig2 - orig1)
         return slope * raw + (calib1 - slope * orig1)
+
+    def reverse_calibration(self, channel_index: int, calibrated: float) -> float:
+        """Convert a logged (calibrated) value back to raw for deque storage."""
+        cal = self.calibrations[channel_index]
+        orig1, calib1 = cal["orig1"], cal["calib1"]
+        orig2, calib2 = cal["orig2"], cal["calib2"]
+        if orig1 == orig2:
+            return calibrated
+        slope = (calib2 - calib1) / (orig2 - orig1)
+        if slope == 0:
+            return calibrated
+        offset = calib1 - slope * orig1
+        return (calibrated - offset) / slope
+
+    def _history_lookback_seconds(self) -> int:
+        """Longest time window (N * T) across all interval buffers."""
+        return MAXLEN * max(interval.value for interval in Interval)
+
+    def _iter_log_file_paths(self, oldest: datetime):
+        """Yield daily log file paths from ``oldest`` through today."""
+        if not os.path.isdir(_LOG_DIR):
+            return
+
+        current_day = oldest.date()
+        end_day = datetime.now().date()
+        one_day = timedelta(days=1)
+
+        while current_day <= end_day:
+            path = os.path.join(
+                _LOG_DIR,
+                f"{current_day.year:04d}",
+                f"{current_day.month:02d}",
+                f"{current_day.day:02d}.txt",
+            )
+            if os.path.isfile(path):
+                yield path
+            current_day += one_day
+
+    def _parse_log_records(self, since: datetime) -> list[tuple[datetime, list[float]]]:
+        """Read log files and return raw deque samples sorted by time."""
+        records: list[tuple[datetime, list[float]]] = []
+
+        for path in self._iter_log_file_paths(since):
+            try:
+                with open(path, "r", encoding="utf-8") as log_file:
+                    for line in log_file:
+                        match = _LOG_LINE_RE.match(line.strip())
+                        if not match:
+                            continue
+
+                        dt = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                        if dt < since:
+                            continue
+
+                        v_pl = float(match.group(2))
+                        p_pl = float(match.group(3))
+                        p_st = float(match.group(4))
+                        p_pur = float(match.group(5))
+
+                        # Log order: V_pl, P_pl, P_st, P_pur → deque: P_st, P_pl, V_pl, P_pur
+                        calibrated = [p_st, p_pl, v_pl, p_pur]
+                        raw = [
+                            self.reverse_calibration(i, calibrated[i])
+                            for i in range(4)
+                        ]
+                        records.append((dt, raw))
+            except OSError as e:
+                print(f"[LOG] Failed to read {path}: {e}")
+
+        records.sort(key=lambda item: item[0])
+        return records
+
+    def _load_history_from_logs(self) -> int:
+        """Restore deque buffers from log files within each buffer's N*T window."""
+        now = datetime.now()
+        since = now - timedelta(seconds=self._history_lookback_seconds())
+        records = self._parse_log_records(since)
+        if not records:
+            return 0
+
+        self.arduino_deque.load_historical(records, reference_time=now)
+        return len(records)
 
     def get_simulation_data(self):
         """테스트용 시뮬레이션 데이터 생성"""
@@ -861,7 +956,7 @@ class PressureLevelPlotter:
         # Apply calibration before logging
         cal = [self.apply_calibration(i, arduino_data[i]) for i in range(4)]
 
-        log_dir = "log_pressurelevel"
+        log_dir = _LOG_DIR
 
         year = time.strftime('%Y')
         month = time.strftime('%m')
@@ -976,6 +1071,19 @@ class PressureLevelPlotter:
             import traceback
             traceback.print_exc()
 
+    def _on_close(self) -> None:
+        """Handle window close: clean up matplotlib then force-exit.
+
+        plt.close('all') must be called before root.destroy() to prevent
+        matplotlib's atexit handler from trying to access the already-destroyed
+        tkinter root, which causes the process to hang (especially in
+        PyInstaller --noconsole builds).  os._exit() then bypasses the rest of
+        Python's shutdown sequence entirely, guaranteeing the process exits.
+        """
+        plt.close('all')
+        self.master.destroy()
+        os._exit(0)
+
     def show_email_alert(self, message: str):
         """
         Show non-modal window for email alert failure notification.
@@ -1057,4 +1165,5 @@ if __name__ == "__main__":
     root.iconbitmap(resource_path("PressureLevelPlotter.ico"))
     app = PressureLevelPlotter(root)
     app.start()
+    root.protocol("WM_DELETE_WINDOW", app._on_close)
     root.mainloop()

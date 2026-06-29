@@ -13,3 +13,9 @@ Flow_and_Temp/Lakeshore330/build/*
 recipent.txt
 sender.txt
 *.txt
+log_pressurelevel/
+log.txt
+maillog.txt
+mail_config.json
+**/build/
+**/dist/

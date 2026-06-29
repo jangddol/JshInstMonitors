@@ -2,6 +2,7 @@ import time
 from collections import deque
 from datetime import datetime, timedelta
 from enum import Enum
+from typing import List, Sequence, Tuple
 
 MAXLEN = 100
 
@@ -10,6 +11,15 @@ class Interval(Enum):
     ONE_MINUTE = 60
     TEN_MINUTES = 600
     ONE_HOUR = 3600
+
+
+_INTERVAL_LOAD_SPECS: List[Tuple[Interval, timedelta]] = [
+    (Interval.ONE_SECOND, timedelta(seconds=1)),
+    (Interval.ONE_MINUTE, timedelta(minutes=1)),
+    (Interval.TEN_MINUTES, timedelta(minutes=10)),
+    (Interval.ONE_HOUR, timedelta(hours=1)),
+]
+
 
 class VariousTimeDeque:
     def __init__(self, numdata):
@@ -91,6 +101,51 @@ class VariousTimeDeque:
 
     def get_last_data(self):
         return [x[-1] for x in self.data_1s]
+
+    def clear(self) -> None:
+        """Remove all stored samples from every interval buffer."""
+        self.time_1s.clear()
+        self.time_1min.clear()
+        self.time_10min.clear()
+        self.time_1hour.clear()
+        for channel in self.data_1s + self.data_1min + self.data_10min + self.data_1hour:
+            channel.clear()
+
+    def load_historical(
+        self,
+        records: Sequence[Tuple[datetime, Sequence[float]]],
+        reference_time: datetime | None = None,
+    ) -> None:
+        """Populate buffers from past log records.
+
+        For each interval with period T and maxlen N, only records at or after
+        ``reference_time - N * T`` are considered. The 1 s buffer keeps every
+        record in that window; coarser buffers subsample with the same spacing
+        rules as :meth:`update_data`.
+        """
+        if reference_time is None:
+            reference_time = datetime.now()
+
+        self.clear()
+
+        for interval, min_delta in _INTERVAL_LOAD_SPECS:
+            window = timedelta(seconds=MAXLEN * interval.value)
+            cutoff = reference_time - window
+            time_deque = self.get_time_deque(interval)
+            data_deques = self.get_data_deque(interval)
+
+            last_time: datetime | None = None
+            for dt, data in records:
+                if dt < cutoff:
+                    continue
+                if interval != Interval.ONE_SECOND:
+                    if last_time is not None and dt - last_time < min_delta:
+                        continue
+
+                time_deque.append(dt)
+                for i in range(self.numdata):
+                    data_deques[i].append(data[i])
+                last_time = dt
 
     def set_test_data(self):
         for _ in range(MAXLEN):

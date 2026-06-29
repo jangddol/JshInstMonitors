@@ -37,9 +37,9 @@
 
 ### 3-2. `ArduinoADCReceiver.py` (수신 데몬)
 
-- Serial(COM4, 9600 baud)로 Arduino 데이터를 수신한다.
-- 수신값에 소프트웨어 지수 필터(β = `exp(-2π × 0.5 s / 10 s)`)를 추가 적용한다.
-- `localhost:5003/Meas` HTTP GET 엔드포인트로 최신 측정값을 JSON 노출한다.
+- Serial 포트·HTTP 포트 등은 `arduinoadcreceiver_config.json`에서 읽는다. 파일이 없거나 잘못되면 기본값으로 자동 생성한다.
+- 수신값에 소프트웨어 지수 필터(β = `exp(-2π × arduino_period / filter_cutoff_second)`)를 추가 적용한다.
+- `localhost:<localserver_port>/Meas` HTTP GET 엔드포인트로 최신 측정값을 JSON 노출한다.
 
 **변환 공식**
 
@@ -95,6 +95,7 @@
 - Tkinter 윈도우 + matplotlib TkAgg 백엔드를 사용한다.
 - 별도 스레드(`fetch_loop`)가 1초마다 HTTP 데이터를 수집하여 `VariousTimeDeque`에 저장한다.
 - GUI 메인 루프는 200 ms 주기로 `update_display`를 호출한다.
+- **시작 시 로그 복원**: `log_pressurelevel/`에 저장된 1분 주기 로그가 있으면, 각 인터벌 버퍼의 `N × T` 윈도우(예: 1 s → 100 s, 1 hour → 100 h) 안의 기록만 읽어 deque를 채운다. 로그에는 calibrated 값이 저장되므로, deque에 넣기 전 `reverse_calibration()`으로 raw로 되돌린다. 해당 구간에 로그가 없으면 버퍼는 비어 있거나 0으로 초기화된다.
 
 **표시 채널**
 
@@ -170,6 +171,38 @@ Setting 창에서 채널별 **Cal** 버튼을 눌러 열 수 있는 논모달 `t
 
 ## 6. 설정 파일
 
+### `arduinoadcreceiver_config.json`
+
+`ArduinoADCReceiver.py`와 같은 디렉터리(또는 exe 옆)에 위치한다. 첫 실행 시 자동 생성된다.
+
+```json
+{
+  "arduino_port": "COM4",
+  "localserver_port": 5003,
+  "baud_rate": 9600,
+  "serial_timeout": 1,
+  "reconnect_delay": 1.0,
+  "loop_sleep": 0.1,
+  "buffer_flush_interval": 30,
+  "filter_cutoff_second": 10,
+  "arduino_period": 0.5
+}
+```
+
+| 키 | 설명 | 기본값 |
+|---|---|---|
+| `arduino_port` | Arduino Serial 포트 | `"COM4"` |
+| `localserver_port` | HTTP 서버 포트 | `5003` |
+| `baud_rate` | Serial baud rate | `9600` |
+| `serial_timeout` | Serial read timeout (초) | `1` |
+| `reconnect_delay` | 연결 실패 후 재시도 대기 (초) | `1.0` |
+| `loop_sleep` | 메인 루프 폴링 간격 (초) | `0.1` |
+| `buffer_flush_interval` | Serial 버퍼 flush 주기 (초) | `30` |
+| `filter_cutoff_second` | 소프트웨어 LPF cutoff (초) | `10` |
+| `arduino_period` | Arduino 전송 주기 (초, 펌웨어 500 ms와 일치) | `0.5` |
+
+> PC를 옮길 때는 `arduino_port`만 해당 환경의 COM 포트로 수정하면 된다.
+
 ### `mail_config.json`
 
 ```json
@@ -198,8 +231,9 @@ Setting 창에서 채널별 **Cal** 버튼을 눌러 열 수 있는 논모달 `t
 ```
 Pressure_and_Level/
 ├── ArduinoADCReceiver/
-│   ├── ArduinoADCReceiver.ino   # Arduino 펌웨어
-│   └── ArduinoADCReceiver.py    # Serial → HTTP:5003 브릿지
+│   ├── ArduinoADCReceiver.ino          # Arduino 펌웨어
+│   ├── ArduinoADCReceiver.py           # Serial → HTTP 브릿지
+│   └── arduinoadcreceiver_config.json  # 실행 시 자동 생성 — Serial/HTTP 설정
 └── PressureLevelPlotter/
     ├── PressureLevelPlotter.py  # GUI 메인
     ├── PressureLevelSetting.py  # 설정 창 (채널 순서·표시·Cal 버튼)
