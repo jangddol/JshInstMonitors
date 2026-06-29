@@ -10,9 +10,9 @@ class CustomDateLocator(Locator):
     def __call__(self):
         try:
             vmin, vmax = self.axis.get_view_interval()
-            
-            start = mdates.num2date(vmin).replace(microsecond=0)
-            end = mdates.num2date(vmax).replace(microsecond=0)
+
+            start = mdates.num2date(vmin).replace(microsecond=0, tzinfo=None)
+            end = mdates.num2date(vmax).replace(microsecond=0, tzinfo=None)
             
             # 시간 범위가 너무 짧은 경우 처리
             time_diff = (end - start).total_seconds()
