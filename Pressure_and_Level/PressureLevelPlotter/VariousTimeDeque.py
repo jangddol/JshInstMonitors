@@ -88,6 +88,8 @@ class VariousTimeDeque:
         raise ValueError("Invalid interval")
 
     def get_last_time(self):
+        if len(self.time_1s) == 0:
+            return datetime.now()
         return self.time_1s[-1]
 
     def get_last_1min_time(self):
@@ -100,6 +102,8 @@ class VariousTimeDeque:
         return self.time_1hour[-1]
 
     def get_last_data(self):
+        if len(self.data_1s[0]) == 0:
+            return [0.0] * self.numdata
         return [x[-1] for x in self.data_1s]
 
     def clear(self) -> None:

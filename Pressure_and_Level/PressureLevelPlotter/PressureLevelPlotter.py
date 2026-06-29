@@ -81,10 +81,9 @@ class PressureLevelPlotter:
         self.is_plot = _config["channel_visible"]
 
         loaded_count = self._load_history_from_logs()
-        if loaded_count == 0:
-            self.arduino_deque.update_data([0] * 4, time.time())
-        else:
+        if loaded_count > 0:
             print(f"[LOG] Restored {loaded_count} log record(s) into plot buffers")
+        self._ensure_live_sample_after_history_load()
 
         self.update_interval(None)
         if len(self.time_arduino_plot) > 2:
@@ -221,16 +220,19 @@ class PressureLevelPlotter:
         self.update_display()
 
         expected_exc_delay = 0.2
-        if loop_start_time - self.arduino_deque.get_last_time().timestamp() < expected_exc_delay:
+        if (len(self.arduino_deque.time_1s) > 0 and
+                loop_start_time - self.arduino_deque.get_last_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_SECOND:
                 self.update_plot()
 
-        if loop_start_time - self.arduino_deque.get_last_1min_time().timestamp() < expected_exc_delay:
+        if (len(self.arduino_deque.time_1min) > 0 and
+                loop_start_time - self.arduino_deque.get_last_1min_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_MINUTE:
                 self.update_plot()
             self.save_log(self.arduino_deque.get_last_1min_time(), self.arduino_deque.get_last_data())
 
-        if loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay:
+        if (len(self.arduino_deque.time_10min) > 0 and
+                loop_start_time - self.arduino_deque.get_last_10min_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.TEN_MINUTES:
                 self.update_plot()
             # Arduino 상태 체크를 더 안전하게 (활성화되어 있을 때만)
@@ -297,7 +299,8 @@ class PressureLevelPlotter:
                 except (IndexError, TypeError) as e:
                     print(f"Error checking pressure: {e}")
 
-        if loop_start_time - self.arduino_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
+        if (len(self.arduino_deque.time_1hour) > 0 and
+                loop_start_time - self.arduino_deque.get_last_1hour_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_HOUR:
                 self.update_plot()
 
@@ -495,6 +498,24 @@ class PressureLevelPlotter:
 
         records.sort(key=lambda item: item[0])
         return records
+
+    def _ensure_live_sample_after_history_load(self) -> None:
+        """Ensure the 1 s buffer has a sample for display and fetch updates.
+
+        Log restore may fill coarser buffers while the 1 s window (N×1 s) stays
+        empty when the latest log entry is older than that window.
+        """
+        if len(self.arduino_deque.time_1s) > 0:
+            return
+
+        for interval in (Interval.ONE_MINUTE, Interval.TEN_MINUTES, Interval.ONE_HOUR):
+            data_deques = self.arduino_deque.get_data_deque(interval)
+            if len(data_deques[0]) > 0:
+                values = [channel[-1] for channel in data_deques]
+                self.arduino_deque.update_data(values, time.time())
+                return
+
+        self.arduino_deque.update_data([0] * 4, time.time())
 
     def _load_history_from_logs(self) -> int:
         """Restore deque buffers from log files within each buffer's N*T window."""
