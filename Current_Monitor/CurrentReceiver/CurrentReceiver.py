@@ -1,5 +1,4 @@
 import serial
-import numpy as np
 import time
 from typing import Optional
 
@@ -48,17 +47,18 @@ class SerialMediator:
     def process_serial_data(self, data: str) -> None:
         """Process incoming serial data"""
         try:
-            current_bit = map(float, data.strip().split(','))
+            parts = data.strip().split(',')
+            current_bit = float(parts[0])
             self.current = SerialMediator.cal_current(current_bit)
             self.last_read_time = time.time()
 
-        except ValueError as e:
+        except (ValueError, IndexError) as e:
             print(f"Error processing serial data: {e}")
 
     def run(self) -> None:
         """Main loop for serial communication"""
         last_flush_time = time.time()
-        
+
         while self.is_running:
             try:
                 if self.arduino is None or not self.arduino.is_open:
@@ -104,12 +104,12 @@ def main():
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                
+
                 data = {
                     'Current': None if mediator.current is None else f"{mediator.current:.3f}",
                     'timestamp': mediator.last_read_time
                 }
-                
+
                 self.wfile.write(json.dumps(data).encode())
             else:
                 self.send_response(404)
