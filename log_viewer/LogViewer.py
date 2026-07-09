@@ -47,6 +47,7 @@
 # 연속적인 시간으로 불렀는지는, 불러온 로그 파일들의 시간 부분이 연속적인지 확인하여, 연속적이지 않으면 경고문구를 띄울 것임.
 # 그래프를 그릴 기간 표시 입력 영역은 그래프를 그릴 때, 그래프의 x축에 해당하는 값을 입력하는 영역임.
 
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 import matplotlib.pyplot as plt
@@ -138,11 +139,16 @@ class LogViewer:
 
     def drop_files(self, event):
         files = self.root.tk.splitlist(event.data)
+        existing_paths = {logfile.file_path for logfile in self.log_files}
         for file in files:
             logtype = self.check_file(file)
-            if file not in self.log_files:
-                logfile = LogFile(file, None, None, logtype)
-                self.log_files.append(logfile)
+            if logtype is None:
+                continue
+            if file in existing_paths:
+                continue
+            logfile = LogFile(file, None, None, logtype)
+            self.log_files.append(logfile)
+            existing_paths.add(file)
         self.manage_log_files()
         self.update_period()
         self.display_files()
@@ -154,7 +160,7 @@ class LogViewer:
             file_frame = tk.Frame(self.frame2)
             file_frame.pack(fill=tk.X, padx=5, pady=5)
 
-            file_name = tk.Label(file_frame, text=logfile.file_path.split('/')[-1])
+            file_name = tk.Label(file_frame, text=os.path.basename(logfile.file_path))
             file_name.pack(side=tk.LEFT, padx=5, pady=5)
 
             sunken_line1 = tk.Frame(file_frame, width=2, bd=1, relief=tk.SUNKEN)
@@ -307,8 +313,8 @@ class LogViewer:
         
         is_continuous = self.check_continuous_time()
         if not is_continuous:
-            MsgBox = messagebox.showinfo("Warning", "Non-continuous time detected. Maybe some data is missing.")
-        
+            messagebox.showinfo("Warning", "Non-continuous time detected. Maybe some data is missing.")
+
         if len(self.log_files) == 1:
             if self.log_files[0].log_type == "Pressure & Level Log":
                 self.draw_pressure_level_graph()
@@ -345,9 +351,9 @@ class LogViewer:
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()
         ax1.plot(datetimes, volume, 'b-', label='Volume')
-        ax2.plot(datetimes, plant_pressure, 'g-', label=f'P_plant')
-        ax2.plot(datetimes, storage_pressure, 'r-', label=f'P_storage')
-        # ax2.plot(datetimes, purifier_pressure, 'skyblue', label=f'P_purifier')
+        ax2.plot(datetimes, plant_pressure, 'g-', label='P_plant')
+        ax2.plot(datetimes, storage_pressure, 'r-', label='P_storage')
+        ax2.plot(datetimes, purifier_pressure, 'skyblue', label='P_purifier')
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Volume')
         ax2.set_ylabel('Pressure', color='r')
@@ -401,6 +407,7 @@ class LogViewer:
         volume = []
         plant_pressure = []
         storage_pressure = []
+        purifier_pressure = []
 
         datetimes_flowtemp = []
         tip_flow = []
@@ -415,11 +422,12 @@ class LogViewer:
                 with open(logfile.file_path, 'r') as f:
                     for line in f:
                         date, data = line.split(': ')
-                        level, pressure1, pressure2 = data.split(', ')
+                        level, pressure1, pressure2, pressure3 = data.split(', ')
                         datetimes_pressurelevel.append(datetime.strptime(date, "%Y-%m-%d %H:%M:%S"))
                         volume.append(float(level.split()[0]))
                         plant_pressure.append(float(pressure1.split()[0]))
                         storage_pressure.append(float(pressure2.split()[0]))
+                        purifier_pressure.append(float(pressure3.split()[0]))
             elif logfile.log_type == "Flow & Temperature Log":
                 with open(logfile.file_path, 'r') as f:
                     for line in f:
@@ -432,7 +440,7 @@ class LogViewer:
                         pumping_flow.append(float(flow4.split()[0]))
                         head_temperature.append(float(temperature1.split()[0]))
                         coldtip_temperature.append(float(temperature2.split()[0]))
-        
+
         fig, ax = plt.subplots(2, 1)
         ax1 = ax[0]
         ax2 = ax[1]
@@ -440,8 +448,9 @@ class LogViewer:
         ax4 = ax2.twinx()
 
         ax1.plot(datetimes_pressurelevel, volume, 'b-', label='Volume')
-        ax3.plot(datetimes_pressurelevel, plant_pressure, 'g-', label=f'P_plant')
-        ax3.plot(datetimes_pressurelevel, storage_pressure, 'r-', label=f'P_storage')
+        ax3.plot(datetimes_pressurelevel, plant_pressure, 'g-', label='P_plant')
+        ax3.plot(datetimes_pressurelevel, storage_pressure, 'r-', label='P_storage')
+        ax3.plot(datetimes_pressurelevel, purifier_pressure, 'skyblue', label='P_purifier')
         ax1.set_xlabel('Time')
         ax1.set_ylabel('Volume')
         ax3.set_ylabel('Pressure', color='r')
