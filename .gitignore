@@ -14,8 +14,14 @@ recipent.txt
 sender.txt
 *.txt
 log_pressurelevel/
+log_flowtemp/
+log_current/
+flog_pressurelevel/
+flog_flowtemp/
 log.txt
 maillog.txt
+maillog_pressurelevel.txt
+maillog_flowtemp.txt
 mail_config.json
 **/build/
 **/dist/
