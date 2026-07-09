@@ -1,8 +1,20 @@
 import pyvisa
-import json 
+import json
 import atexit
+import os
+import sys
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import time
+
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
+from FuncLogger import FuncLogger
+from paths import writable_path
+
+flog = FuncLogger("flowtemp", "Lakeshore330")
+
 
 class Lakeshore330:
     # Lakeshore330 클래스는 그대로 유지
@@ -10,8 +22,9 @@ class Lakeshore330:
         self.rm = pyvisa.ResourceManager()
         try:
             self.device = self.rm.open_resource(device_address)
+            flog.info(f"Opened device {device_address}")
         except pyvisa.VisaIOError as e:
-            print(f"Error opening device: {e}")
+            flog.error(f"Error opening device: {e}")
             self.device = None
         atexit.register(self.close)
 
@@ -50,6 +63,7 @@ class SensorHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(response).encode())
             except Exception as e:
+                flog.error(f"sensor_pair handler error: {e}")
                 self.send_error(500, str(e))
         else:
             self.send_error(404)
@@ -66,12 +80,12 @@ def open_config_file(file_path: str):
         return device_address, port
 
 if __name__ == '__main__':
-    config_file_path = 'lakeshore330_config.json'
+    config_file_path = writable_path('lakeshore330_config.json')
     try:
         device_address, port = open_config_file(config_file_path)
     except Exception as e:
-        print(e)
-        with open(config_file_path, 'w') as file:
+        flog.caution(f"Config load failed ({e}); writing default config")
+        with open(config_file_path, 'w', encoding='utf-8') as file:
             json.dump({'device_address': 'GPIB1::30::INSTR', 'port': 5001}, file)
         device_address, port = open_config_file(config_file_path)
 
@@ -80,7 +94,9 @@ if __name__ == '__main__':
 
     server = HTTPServer(('0.0.0.0', port), SensorHandler)
     print(f'Server running on port {port}')
+    flog.info(f"HTTP server started on port {port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        flog.info("Shutting down...")
         server.server_close()

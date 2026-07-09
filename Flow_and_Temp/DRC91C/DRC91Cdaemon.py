@@ -1,15 +1,26 @@
 import time
 import pyvisa
 import enum
-import json 
+import json
 import atexit
+import os
+import sys
 from flask import Flask, jsonify
+
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
+from FuncLogger import FuncLogger
+from paths import writable_path
+
+flog = FuncLogger("flowtemp", "DRC91Cdaemon")
 
 
 class Sensor(enum.Enum):
     A = 'A'
     B = 'B'
-    
+
     def cmd(self):
         if self == Sensor.A:
             return 'F2A'
@@ -22,8 +33,9 @@ class DRC91C:
         self.rm = pyvisa.ResourceManager()
         try:
             self.device = self.rm.open_resource(device_address)
+            flog.info(f"Opened device {device_address}")
         except pyvisa.VisaIOError as e:
-            print(f"Error opening device: {e}")
+            flog.error(f"Error opening device: {e}")
             self.device = None
         self.control_sensor = self.get_current_control_sensor()
         self.set_proper_display_sensor()
@@ -81,26 +93,26 @@ def open_config_file(file_path: str):
     # json file has two keys: 'device_address' and 'port'
     # 'device_address' is the address of the GPIB address of the DRC91C·
     # 'port' is the port number of the server. It should be an integer in range of 0 to 65535.
-    
+
     with open(file_path, 'r') as file: # open json from file_path
         config_data = json.load(file)
         device_address = config_data.get('device_address')
         port = config_data.get('port')
-        
+
         if not isinstance(device_address, str) or not isinstance(port, int): # parsing json, check error from casting
             raise ValueError("Invalid configuration data")
-        
+
         return device_address, port
 
 
 if __name__ == '__main__':
-    config_file_path = 'drc91c_config.json'
+    config_file_path = writable_path('drc91c_config.json')
     # If loading fails, create a default config.json.
     try:
         device_address, port = open_config_file(config_file_path)
     except Exception as e:
-        print(e)
-        with open(config_file_path, 'w') as file:
+        flog.caution(f"Config load failed ({e}); writing default config")
+        with open(config_file_path, 'w', encoding='utf-8') as file:
             json.dump({'device_address': 'GPIB1::15::INSTR', 'port': 5001}, file)
         device_address, port = open_config_file(config_file_path)
 
@@ -113,4 +125,5 @@ if __name__ == '__main__':
         print(valueA, valueB)
         return jsonify({'valueA': valueA, 'valueB': valueB, 'timestamp': time.time()})
 
+    flog.info(f"HTTP server starting on port {port}")
     app.run(host='0.0.0.0', port=port)

@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import os
+import re
 import sys
 import requests
 import threading
@@ -13,11 +14,23 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Optional, List, Deque
 
-from CustomDateLocator import CustomDateLocator
-from VariousTimeDeque import VariousTimeDeque, Interval
-from CustomMail import send_mail
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
 
-MAXLEN = 100
+from CustomDateLocator import CustomDateLocator
+from VariousTimeDeque import VariousTimeDeque, Interval, MAXLEN
+from CustomMail import send_mail
+from FuncLogger import FuncLogger
+from paths import bundle_path, writable_path
+
+flog = FuncLogger("flowtemp", "FlowTempPlotter")
+_LOG_DIR_NAME = "log_flowtemp"
+_LOG_LINE_RE = re.compile(
+    r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}): "
+    r"(-?\d+\.\d{2}), (-?\d+\.\d{2}), (-?\d+\.\d{2}), (-?\d+\.\d{2}), "
+    r"(-?\d+\.\d{2}), (-?\d+\.\d{2})$"
+)
 
 
 class FlowTempPlotter:
@@ -51,8 +64,19 @@ class FlowTempPlotter:
 
         self.rfm_status_code: str = "Off"
         self.drc91c_status_code: str = "Off"
+        self._last_logged_rfm_status = None
+        self._last_logged_drc91c_status = None
+
+        flog.info("FlowTempPlotter started")
+
+        loaded_count = self._load_history_from_logs()
+        if loaded_count > 0:
+            flog.info(f"Restored {loaded_count} log record(s) into plot buffers")
+        self._ensure_live_sample_after_history_load()
 
         self.update_interval(None)
+        if len(self.time_rfm_plot) > 2:
+            self.update_plot()
         self.main_loop()
 
     def create_widgets(self):
@@ -187,33 +211,62 @@ class FlowTempPlotter:
         self.update_display()
 
         expected_exc_delay = 0.2
-        if loop_start_time - self.rfm_deque.get_last_time().timestamp() < expected_exc_delay:
+        if (len(self.rfm_deque.time_1s) > 0 and
+                loop_start_time - self.rfm_deque.get_last_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_SECOND:
                 self.update_plot()
 
-        if loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < expected_exc_delay:
+        if (len(self.rfm_deque.time_1min) > 0 and
+                loop_start_time - self.rfm_deque.get_last_1min_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_MINUTE:
                 self.update_plot()
             self.save_log(self.rfm_deque.get_last_1min_time(), self.rfm_deque.get_last_data(), self.drc91c_deque.get_last_data())
 
-        if loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay:
+        if (len(self.rfm_deque.time_10min) > 0 and
+                loop_start_time - self.rfm_deque.get_last_10min_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.TEN_MINUTES:
                 self.update_plot()
             GOOD_STATUS = "200"
-            if self.rfm_status_code != GOOD_STATUS and self.enable_rfm.get():
+            idle_statuses = ("Off", "Connecting")
+            if (
+                self.enable_rfm.get()
+                and self.rfm_status_code != GOOD_STATUS
+                and self.rfm_status_code not in idle_statuses
+            ):
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} MKS247C is disconnected."
                 contents = f"Plz check the MKS247C. MKS247C is disconnected at {date_str}."
-                send_mail(subject, contents)
-            if self.drc91c_status_code != GOOD_STATUS and self.enable_drc91c.get():
+                flog.caution(
+                    f"MKS247C disconnect alert: status={self.rfm_status_code}, sending mail"
+                )
+                result, error_msg = send_mail(subject, contents)
+                if result:
+                    flog.info("MKS247C disconnect alert email sent")
+                else:
+                    flog.error(f"MKS247C disconnect alert email failed: {error_msg}")
+            if (
+                self.enable_drc91c.get()
+                and self.drc91c_status_code != GOOD_STATUS
+                and self.drc91c_status_code not in idle_statuses
+            ):
                 now = datetime.now()
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Temperature controller is disconnected."
                 contents = f"Plz check the temperature controller. Temperature controller is disconnected at {date_str}."
-                send_mail(subject, contents)
+                flog.caution(
+                    f"Temperature controller disconnect alert: status={self.drc91c_status_code}, sending mail"
+                )
+                result, error_msg = send_mail(subject, contents)
+                if result:
+                    flog.info("Temperature controller disconnect alert email sent")
+                else:
+                    flog.error(
+                        f"Temperature controller disconnect alert email failed: {error_msg}"
+                    )
 
-        if loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < expected_exc_delay:
+        if (len(self.rfm_deque.time_1hour) > 0 and
+                loop_start_time - self.rfm_deque.get_last_1hour_time().timestamp() < expected_exc_delay):
             if self.get_interval() == Interval.ONE_HOUR:
                 self.update_plot()
 
@@ -243,6 +296,28 @@ class FlowTempPlotter:
         self.data_fetch_thread.daemon = True
         self.data_fetch_thread.start()
 
+    def _log_status_change(
+        self,
+        device: str,
+        status,
+        last_attr: str,
+        message: str,
+        *,
+        level: str = "error",
+    ) -> None:
+        """Log fetch issues only when status changes (avoid 1 Hz spam)."""
+        if status == getattr(self, last_attr):
+            return
+        setattr(self, last_attr, status)
+        if level == "caution":
+            flog.caution(message)
+        elif level == "critical":
+            flog.critical(message)
+        elif level == "info":
+            flog.info(message)
+        else:
+            flog.error(message)
+
     def parse_temperature(self, value: str) -> float:
         """Parse a temperature value from a string.
 
@@ -267,33 +342,78 @@ class FlowTempPlotter:
             response = requests.get(f"http://127.0.0.1:{self.rfm_localserver_port}/get_value", timeout=1)
             self.rfm_status_code = str(response.status_code)
             if response.status_code != 200:
-                print(f"Error fetching from RFM: {response.status_code}")
+                self._log_status_change(
+                    "RFM",
+                    self.rfm_status_code,
+                    "_last_logged_rfm_status",
+                    f"RFM fetch failed: HTTP {response.status_code}",
+                )
                 return [0, 0, 0, 0]
 
             json = response.json()
 
             if time.time() - json['timestamp'] > 5:
                 self.rfm_status_code = 'DataTooOld'
-                print("Data is too old")
+                self._log_status_change(
+                    "RFM",
+                    self.rfm_status_code,
+                    "_last_logged_rfm_status",
+                    "RFM data is too old",
+                    level="caution",
+                )
                 return [0, 0, 0, 0]
 
             list_of_str = [json['Tip'], json['Shield'], json['Bypass'], json['Pumping']]
-            return [float(x) for x in list_of_str]
+            result = [float(x) for x in list_of_str]
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                "RFM data fetch OK",
+                level="info",
+            )
+            return result
         except requests.exceptions.ConnectionError as e:
             self.rfm_status_code = 'ConnectionError'
-            print(f"Connection error fetching from RFM: {e}")
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                f"RFM connection error: {e}",
+            )
         except requests.exceptions.Timeout as e:
             self.rfm_status_code = 'Timeout'
-            print(f"Timeout error fetching from RFM: {e}")
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                f"RFM timeout: {e}",
+            )
         except requests.exceptions.HTTPError as e:
             self.rfm_status_code = 'HTTPError'
-            print(f"HTTP error fetching from RFM: {e}")
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                f"RFM HTTP error: {e}",
+            )
         except requests.exceptions.RequestException as e:
             self.rfm_status_code = 'RequestException'
-            print(f"General error fetching from RFM: {e}")
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                f"RFM request error: {e}",
+            )
         except Exception as e:
             self.rfm_status_code = 'Critical'
-            print(f"Critical error fetching from RFM: {e}")
+            self._log_status_change(
+                "RFM",
+                self.rfm_status_code,
+                "_last_logged_rfm_status",
+                f"RFM critical error: {e}",
+                level="critical",
+            )
         return [0, 0, 0, 0]
 
     def get_data_from_drc91c(self) -> List[float]:
@@ -309,33 +429,78 @@ class FlowTempPlotter:
             response = requests.get(f"http://127.0.0.1:{self.drc91c_localserver_port}/sensor_pair", timeout=1)
             self.drc91c_status_code = str(response.status_code)
             if response.status_code != 200:
-                print(f"Error fetching from DRC91C: {response.status_code}")
+                self._log_status_change(
+                    "DRC91C",
+                    self.drc91c_status_code,
+                    "_last_logged_drc91c_status",
+                    f"DRC91C fetch failed: HTTP {response.status_code}",
+                )
                 return [0, 0]
 
             json = response.json()
 
             if time.time() - json['timestamp'] > 5:
                 self.drc91c_status_code = 'DataTooOld'
-                print("Data is too old")
+                self._log_status_change(
+                    "DRC91C",
+                    self.drc91c_status_code,
+                    "_last_logged_drc91c_status",
+                    "DRC91C data is too old",
+                    level="caution",
+                )
                 return [0, 0]
 
             list_of_str = [json['valueA'], json['valueB']]
-            return [self.parse_temperature(x) for x in list_of_str]
+            result = [self.parse_temperature(x) for x in list_of_str]
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                "DRC91C data fetch OK",
+                level="info",
+            )
+            return result
         except requests.exceptions.ConnectionError as e:
             self.drc91c_status_code = 'ConnectionError'
-            print(f"Connection error fetching from RFM: {e}")
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                f"DRC91C connection error: {e}",
+            )
         except requests.exceptions.Timeout as e:
             self.drc91c_status_code = 'Timeout'
-            print(f"Timeout error fetching from RFM: {e}")
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                f"DRC91C timeout: {e}",
+            )
         except requests.exceptions.HTTPError as e:
             self.drc91c_status_code = 'HTTPError'
-            print(f"HTTP error fetching from RFM: {e}")
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                f"DRC91C HTTP error: {e}",
+            )
         except requests.exceptions.RequestException as e:
             self.drc91c_status_code = 'RequestException'
-            print(f"General error fetching from RFM: {e}")
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                f"DRC91C request error: {e}",
+            )
         except Exception as e:
             self.drc91c_status_code = 'Critical'
-            print(f"Critical error fetching from RFM: {e}")
+            self._log_status_change(
+                "DRC91C",
+                self.drc91c_status_code,
+                "_last_logged_drc91c_status",
+                f"DRC91C critical error: {e}",
+                level="critical",
+            )
         return [0, 0]
 
     def fetch_data(self):
@@ -477,6 +642,92 @@ class FlowTempPlotter:
 
         self.figure.autofmt_xdate()
 
+    def _history_lookback_seconds(self) -> int:
+        """Longest time window (N * T) across all interval buffers."""
+        return MAXLEN * max(interval.value for interval in Interval)
+
+    def _iter_log_file_paths(self, oldest: datetime):
+        """Yield daily log file paths from ``oldest`` through today."""
+        log_dir = writable_path(_LOG_DIR_NAME)
+        if not os.path.isdir(log_dir):
+            return
+
+        current_day = oldest.date()
+        end_day = datetime.now().date()
+        one_day = timedelta(days=1)
+
+        while current_day <= end_day:
+            path = os.path.join(
+                log_dir,
+                f"{current_day.year:04d}",
+                f"{current_day.month:02d}",
+                f"{current_day.day:02d}.txt",
+            )
+            if os.path.isfile(path):
+                yield path
+            current_day += one_day
+
+    def _parse_log_records(self, since: datetime) -> list[tuple[datetime, list[float], list[float]]]:
+        """Read log files and return (time, rfm, drc91c) samples sorted by time."""
+        records: list[tuple[datetime, list[float], list[float]]] = []
+
+        for path in self._iter_log_file_paths(since):
+            try:
+                with open(path, "r", encoding="utf-8") as log_file:
+                    for line in log_file:
+                        match = _LOG_LINE_RE.match(line.strip())
+                        if not match:
+                            continue
+
+                        dt = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+                        if dt < since:
+                            continue
+
+                        rfm = [float(match.group(i)) for i in range(2, 6)]
+                        drc = [float(match.group(i)) for i in range(6, 8)]
+                        records.append((dt, rfm, drc))
+            except OSError as e:
+                flog.error(f"Failed to read data log {path}: {e}")
+
+        records.sort(key=lambda item: item[0])
+        return records
+
+    def _ensure_live_sample_after_history_load(self) -> None:
+        """Ensure 1 s buffers have a sample for display and fetch updates."""
+        if len(self.rfm_deque.time_1s) == 0:
+            for interval in (Interval.ONE_MINUTE, Interval.TEN_MINUTES, Interval.ONE_HOUR):
+                data_deques = self.rfm_deque.get_data_deque(interval)
+                if len(data_deques[0]) > 0:
+                    values = [channel[-1] for channel in data_deques]
+                    self.rfm_deque.update_data(values, time.time())
+                    break
+            else:
+                self.rfm_deque.update_data([0] * 4, time.time())
+
+        if len(self.drc91c_deque.time_1s) == 0:
+            for interval in (Interval.ONE_MINUTE, Interval.TEN_MINUTES, Interval.ONE_HOUR):
+                data_deques = self.drc91c_deque.get_data_deque(interval)
+                if len(data_deques[0]) > 0:
+                    values = [channel[-1] for channel in data_deques]
+                    self.drc91c_deque.update_data(values, time.time())
+                    break
+            else:
+                self.drc91c_deque.update_data([0] * 2, time.time())
+
+    def _load_history_from_logs(self) -> int:
+        """Restore deque buffers from log files within each buffer's N*T window."""
+        now = datetime.now()
+        since = now - timedelta(seconds=self._history_lookback_seconds())
+        records = self._parse_log_records(since)
+        if not records:
+            return 0
+
+        rfm_records = [(dt, rfm) for dt, rfm, _drc in records]
+        drc_records = [(dt, drc) for dt, _rfm, drc in records]
+        self.rfm_deque.load_historical(rfm_records, reference_time=now)
+        self.drc91c_deque.load_historical(drc_records, reference_time=now)
+        return len(records)
+
     def save_log(self, time: datetime, rfm_data: List[float], drc91c_data: List[float]):
         """Save the log data to a file.
 
@@ -485,27 +736,21 @@ class FlowTempPlotter:
             rfm_data (List[float]): The RFM data to log.
             drc91c_data (List[float]): The DRC91C data to log.
         """
-        # 로그 폴더 경로 설정
-        log_dir = "log_flowtemp"
-
-        # 현재 날짜에 맞는 폴더 경로 설정
         year = time.strftime('%Y')
         month = time.strftime('%m')
         day = time.strftime('%d')
 
-        # 연도/월 폴더 경로
-        year_month_dir = os.path.join(log_dir, year, month)
-
-        # 폴더가 없으면 생성
+        year_month_dir = writable_path(_LOG_DIR_NAME, year, month)
         os.makedirs(year_month_dir, exist_ok=True)
 
-        # 날짜에 해당하는 로그 파일 경로
         log_file_path = os.path.join(year_month_dir, f"{day}.txt")
 
-        # 로그 파일에 데이터 추가
-        with open(log_file_path, "a") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {rfm_data[3]:.2f}, {drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n")
-
+        with open(log_file_path, "a", encoding="utf-8") as f:
+            f.write(
+                f"{time.strftime('%Y-%m-%d %H:%M:%S')}: "
+                f"{rfm_data[0]:.2f}, {rfm_data[1]:.2f}, {rfm_data[2]:.2f}, {rfm_data[3]:.2f}, "
+                f"{drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n"
+            )
 
 <<<<<<< HEAD
 =======
@@ -533,48 +778,30 @@ def open_config_file(file_path: str) -> tuple[int, int]:
     Returns:
         (int, int): The RFM and DRC91C local server ports.
     """
-    with open(file_path, 'r') as file:  # open json from file_path
+    with open(file_path, 'r', encoding='utf-8') as file:
         config_data = json.load(file)
 
         _rfm_localserver_port = config_data.get('rfm_localserver_port')
         _drc91c_localserver_port = config_data.get('drc91c_localserver_port')
 
-        if not isinstance(_rfm_localserver_port, int) or not isinstance(_drc91c_localserver_port, int):  # parsing json, check error from casting
+        if not isinstance(_rfm_localserver_port, int) or not isinstance(_drc91c_localserver_port, int):
             raise ValueError("Invalid configuration data")
 
         return _rfm_localserver_port, _drc91c_localserver_port
 
 
-def resource_path(relative_path: str) -> str:
-    """Get absolute path to resource, works for dev and for PyInstaller.
-
-    Args:
-        relative_path (str): The relative path to the resource.
-
-    Returns:
-        str: The absolute path to the resource.
-    """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-
 if __name__ == "__main__":
-    config_file_path = 'flowtempplotter_config.json'
+    config_file_path = writable_path('flowtempplotter_config.json')
     try:
         rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
     except Exception as e:
-        print(e)
-        with open(config_file_path, 'w') as file:
+        flog.caution(f"Config load failed ({e}); writing default config")
+        with open(config_file_path, 'w', encoding='utf-8') as file:
             json.dump({'rfm_localserver_port': 5000, 'drc91c_localserver_port': 5001}, file)
         rfm_localserver_port, drc91c_localserver_port = open_config_file(config_file_path)
 
     root = tk.Tk()
-    root.iconbitmap(resource_path("FlowTempPlotter.ico"))
+    root.iconbitmap(bundle_path("FlowTempPlotter.ico"))
     app = FlowTempPlotter(root, rfm_localserver_port, drc91c_localserver_port)
     app.start()
     root.protocol("WM_DELETE_WINDOW", app._on_close)

@@ -1,1 +1,1 @@
-python3.exe -m PyInstaller --onefile --noconsole -n=FlowTempPlotter --icon=.\FlowTempPlotter.ico --add-data "FlowTempPlotter.ico;." .\FlowTempPlotter.py
+python3.exe -m PyInstaller --onefile --noconsole -n=FlowTempPlotter --icon=.\FlowTempPlotter.ico --add-data "FlowTempPlotter.ico;." --paths=..\..\common --hidden-import=FuncLogger --hidden-import=paths .\FlowTempPlotter.py

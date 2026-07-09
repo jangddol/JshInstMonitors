@@ -7,6 +7,18 @@ from tkinter import messagebox
 from channel import ChannelName
 import enum
 
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
+from paths import bundle_path
+
+
+def resource_path(relative_path):
+    """Resolve bundled icon assets."""
+    return bundle_path(relative_path)
+
+
 class Wday(enum.Enum):
     Mon = "Mon"
     Tue = "Tue"
@@ -147,17 +159,6 @@ class ScheduleWidget:
         self.frame.destroy()
         self.frame = tk.Frame(self.parent.schedule_frame)
         self.create_widgets()
-
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
 
 
 class SchedularWindow:

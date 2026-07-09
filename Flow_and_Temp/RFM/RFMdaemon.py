@@ -7,9 +7,17 @@ import os
 import sys
 from enum import Enum
 
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
 from RFMserial import RFMserial
 from channel import Channel, ChannelName, convert_int_to_channel
 from schedularwindow import Action, SchedularWindow, ScheduleWidget
+from FuncLogger import FuncLogger
+from paths import bundle_path, writable_path
+
+flog = FuncLogger("flowtemp", "RFMdaemon")
 
 SERIAL_ON = True
 
@@ -176,7 +184,7 @@ class RFMApp:
                         flow_values[i] = flows[int(self.channels[i].value) - 1] if self.channels[i] != Channel.CH_UNKNOWN else 0
                     success_flag = True
                 except Exception as e:
-                    print(e)
+                    flog.caution(f"Serial parse error: {e}")
 
         self.last_read_time = time.time()
         return flow_values
@@ -201,23 +209,23 @@ class RFMApp:
         try:
             schedule.day.get_int()
         except:
-            print("Invalid schedule data : day")
+            flog.caution("Invalid schedule data: day")
             return False
         try:
             schedule.hour
         except:
-            print("Invalid schedule data : hour")
+            flog.caution("Invalid schedule data: hour")
             return False
         try:
             schedule.minute
         except:
-            print("Invalid schedule data : minute")
+            flog.caution("Invalid schedule data: minute")
             return False
         if schedule.action == Action.Setpoint:
             try:
                 schedule.number
             except:
-                print("Invalid schedule data : setpoint")
+                flog.caution("Invalid schedule data: setpoint")
                 return False
         is_same_day = schedule.day.get_int() == localtime.tm_wday
         is_same_time: bool = schedule.hour == localtime.tm_hour and schedule.minute == localtime.tm_min
@@ -536,14 +544,8 @@ def open_config_file(file_path: str):
 
 
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
+    """Resolve bundled icon assets."""
+    return bundle_path(relative_path)
 
 
 if __name__ == "__main__":
@@ -553,13 +555,13 @@ if __name__ == "__main__":
     # Initialize rfmapp as None
     rfmapp = None
     
-    config_file_path = "rfm_config.json"
+    config_file_path = writable_path("rfm_config.json")
     # If loading fails, create a default config.json.
     try:
         arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
     except Exception as e:
-        print(e)
-        with open(config_file_path, 'w') as file:
+        flog.caution(f"Config load failed ({e}); writing default config")
+        with open(config_file_path, 'w', encoding='utf-8') as file:
             json.dump({'arduino_port': 'COM3', 'localserver_port': 5000, 'pc_input_max':99, 'arduino_read_max':4095}, file)
         arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
 
@@ -592,18 +594,20 @@ if __name__ == "__main__":
         global rfmapp
         try:
             rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
+            flog.info("RFMdaemon GUI started")
             rfmapp.master.mainloop()
         except Exception as e:
-            print(f"Application error: {e}")
+            flog.critical(f"Application error: {e}")
             rfmapp = None
 
     def run_server():
         try:
             server = HTTPServer(('localhost', localserver_port), RFMHandler)
             print(f"HTTP Server started on localhost:{localserver_port}")
+            flog.info(f"HTTP server started on localhost:{localserver_port}")
             server.serve_forever()
         except Exception as e:
-            print(f"Server error: {e}")
+            flog.error(f"Server error: {e}")
 
     # Start HTTP server in a separate thread
     server_thread = threading.Thread(target=run_server)
