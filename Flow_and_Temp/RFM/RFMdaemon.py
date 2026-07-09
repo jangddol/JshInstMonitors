@@ -24,7 +24,8 @@ from schedularwindow import SchedularWindow
 
 flog = FuncLogger("flowtemp", "RFMdaemon")
 
-SERIAL_ON = True
+# Default when config omits serial_on. Prefer rfm_config.json "serial_on".
+DEFAULT_SERIAL_ON = True
 
 # graphic constants
 COLUMNWIDTH = 235
@@ -68,10 +69,10 @@ UPDATE_INTERVAL_MS = 100
 class RFMApp:
     """Tk view + input handlers. All MFC/serial/schedule logic is in self.ctrl."""
 
-    def __init__(self, master, port, pc_input_max, arduino_read_max):
+    def __init__(self, master, port, pc_input_max, arduino_read_max, serial_on=DEFAULT_SERIAL_ON):
         flog.info("RFMApp.__init__: start")
         self.master = master
-        self.ctrl = RFMController(SERIAL_ON, port, pc_input_max, arduino_read_max, flog)
+        self.ctrl = RFMController(serial_on, port, pc_input_max, arduino_read_max, flog)
 
         self.highlighted_entry = ENTRY_HIGHLIGHTED_NONE
         self.mn = False
@@ -532,22 +533,24 @@ class RFMApp:
 
 
 def open_config_file(file_path: str):
-    with open(file_path, "r") as file:
+    with open(file_path, "r", encoding="utf-8") as file:
         config_data = json.load(file)
         arduino_port = config_data.get("arduino_port")
         localserver_port = config_data.get("localserver_port")
         pc_input_max = config_data.get("pc_input_max")
         arduino_read_max = config_data.get("arduino_read_max")
+        serial_on = config_data.get("serial_on", DEFAULT_SERIAL_ON)
 
         if (
             not isinstance(arduino_port, str)
             or not isinstance(localserver_port, int)
             or not isinstance(pc_input_max, int)
             or not isinstance(arduino_read_max, int)
+            or not isinstance(serial_on, bool)
         ):
             raise ValueError("Invalid configuration data")
 
-        return arduino_port, localserver_port, pc_input_max, arduino_read_max
+        return arduino_port, localserver_port, pc_input_max, arduino_read_max, serial_on
 
 
 def resource_path(relative_path):
@@ -561,10 +564,12 @@ if __name__ == "__main__":
     config_file_path = writable_path("rfm_config.json")
     try:
         flog.info(f"Loading config: {config_file_path}")
-        arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
+        arduino_port, localserver_port, pc_input_max, arduino_read_max, serial_on = open_config_file(
+            config_file_path
+        )
         flog.info(
             f"Config ok: port={arduino_port} http={localserver_port} "
-            f"pc_max={pc_input_max} adc_max={arduino_read_max}"
+            f"pc_max={pc_input_max} adc_max={arduino_read_max} serial_on={serial_on}"
         )
     except Exception as e:
         flog.caution(f"Config load failed ({e}); writing default config")
@@ -575,10 +580,13 @@ if __name__ == "__main__":
                     "localserver_port": 5000,
                     "pc_input_max": 99,
                     "arduino_read_max": 4095,
+                    "serial_on": True,
                 },
                 file,
             )
-        arduino_port, localserver_port, pc_input_max, arduino_read_max = open_config_file(config_file_path)
+        arduino_port, localserver_port, pc_input_max, arduino_read_max, serial_on = open_config_file(
+            config_file_path
+        )
 
     class RFMHandler(SimpleHTTPRequestHandler):
         def do_GET(self):
@@ -606,7 +614,7 @@ if __name__ == "__main__":
             # Quiet default HTTP access spam; functional log covers server lifecycle.
             return
 
-    def run_app(port, pc_input_max, arduino_read_max):
+    def run_app(port, pc_input_max, arduino_read_max, serial_on):
         flog.info("run_app: creating Tk root")
         master = tk.Tk()
         try:
@@ -618,7 +626,7 @@ if __name__ == "__main__":
         global rfmapp
         try:
             flog.info("run_app: constructing RFMApp")
-            rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max)
+            rfmapp = RFMApp(master, port, pc_input_max, arduino_read_max, serial_on=serial_on)
             flog.info("RFMdaemon GUI started (entering mainloop)")
             rfmapp.master.mainloop()
             flog.info("RFMdaemon mainloop exited")
@@ -658,4 +666,4 @@ if __name__ == "__main__":
     server_thread.start()
     time.sleep(1)
     flog.info("HTTP wait done; launching GUI")
-    run_app(arduino_port, pc_input_max, arduino_read_max)
+    run_app(arduino_port, pc_input_max, arduino_read_max, serial_on)
