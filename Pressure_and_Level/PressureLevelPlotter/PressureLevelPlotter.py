@@ -17,13 +17,20 @@ import matplotlib.pyplot as plt
 from matplotlib import ticker
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
 from CalibrationWindow import CalibrationWindow, CHANNEL_KEYS
 from CustomDateLocator import CustomDateLocator
 from PressureLevelSetting import PressureLevelSetting
 from VariousTimeDeque import VariousTimeDeque, Interval, MAXLEN
 from CustomMail import send_mail
+from FuncLogger import FuncLogger
+from paths import bundle_path, writable_path
 
-_LOG_DIR = "log_pressurelevel"
+_LOG_DIR_NAME = "log_pressurelevel"
+flog = FuncLogger("pressurelevel", "PressureLevelPlotter")
 _LOG_LINE_RE = re.compile(
     r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}): "
     r"(-?\d+\.\d{2}) L, (-?\d+\.\d{2}) psi, (-?\d+\.\d{2}) psi, (-?\d+\.\d{2}) psi$"
@@ -39,15 +46,6 @@ _CALIBRATION_DEFAULT = [
     {"orig1": 0.0, "calib1": 0.0, "orig2": 1.0, "calib2": 1.0}
     for _ in range(4)
 ]
-
-
-def _get_writable_path(filename: str) -> str:
-    """Return a writable path next to the exe (frozen) or this script (dev)."""
-    if getattr(sys, 'frozen', False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.abspath(os.path.dirname(__file__))
-    return os.path.join(base, filename)
 
 
 class PressureLevelPlotter:
@@ -67,6 +65,7 @@ class PressureLevelPlotter:
         self.data_arduino_plot = self.arduino_deque.get_data_deque(Interval.ONE_SECOND)
 
         self.arduino_status_code = "Off"
+        self._last_logged_arduino_status = None
 
         # Email alert notification window (non-modal)
         self.email_alert_window = None
@@ -80,9 +79,11 @@ class PressureLevelPlotter:
         self.last_positions = _config["channel_order"]
         self.is_plot = _config["channel_visible"]
 
+        flog.info("PressureLevelPlotter started")
+
         loaded_count = self._load_history_from_logs()
         if loaded_count > 0:
-            print(f"[LOG] Restored {loaded_count} log record(s) into plot buffers")
+            flog.info(f"Restored {loaded_count} log record(s) into plot buffers")
         self._ensure_live_sample_after_history_load()
 
         self.update_interval(None)
@@ -243,14 +244,14 @@ class PressureLevelPlotter:
                 date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                 subject = f"{date_str} Arduino is disconnected."
                 content = f"Plz check the Arduino. Arduino is disconnected at {date_str}."
-                print(f"[EMAIL] Arduino 연결 문제 감지 - 상태 코드: {self.arduino_status_code}")
-                print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
+                flog.caution(
+                    f"Arduino disconnect alert: status={self.arduino_status_code}, sending mail"
+                )
                 result, error_msg = send_mail(subject, content)
                 if result:
-                    print(f"[EMAIL] 메일 전송 성공 - Arduino 연결 문제 알림")
+                    flog.info("Arduino disconnect alert email sent")
                 else:
-                    print(f"[EMAIL] 메일 전송 실패 - Arduino 연결 문제 알림")
-                    print(f"[EMAIL] 실패 원인: {error_msg}")
+                    flog.error(f"Arduino disconnect alert email failed: {error_msg}")
                     alert_message = f"Failed to send Arduino disconnection alert email"
                     if error_msg:
                         alert_message += f"\n\nError: {error_msg}"
@@ -267,37 +268,37 @@ class PressureLevelPlotter:
                             date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                             subject = f"{date_str} Pressure is too high : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
                             content = f"Plz check the Pressure. Pressure is too high at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
-                            print(f"[EMAIL] 압력 임계값 초과 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
-                            print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
+                            flog.caution(
+                                f"High pressure alert: P_pl={p_plant:.2f}, P_st={p_storage:.2f}, sending mail"
+                            )
                             result, error_msg = send_mail(subject, content)
                             if result:
-                                print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 초과 알림")
+                                flog.info("High pressure alert email sent")
                             else:
-                                print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 초과 알림")
-                                print(f"[EMAIL] 실패 원인: {error_msg}")
+                                flog.error(f"High pressure alert email failed: {error_msg}")
                                 alert_message = f"Failed to send pressure alert email"
                                 if error_msg:
                                     alert_message += f"\n\nError: {error_msg}"
                                 self.show_email_alert(alert_message)
-                        if p_plant < 0.25:
+                        if p_storage < 0.25:
                             now = datetime.now()
                             date_str = now.strftime("%Y-%m-%d %H:%M:%S")
                             subject = f"{date_str} Storage Pressure is too low : P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi"
-                            content = f"Plz check the Pressure. Pressure is too low at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
-                            print(f"[EMAIL] 압력 임계값 미만 감지 - P_plant: {p_plant:.2f} psi, P_storage: {p_storage:.2f} psi")
-                            print(f"[EMAIL] 메일 전송 시도 - 제목: {subject}")
+                            content = f"Plz check the Pressure. Storage pressure is too low at {date_str}. P_pl = {p_plant:.2f} psi, P_st = {p_storage:.2f} psi."
+                            flog.caution(
+                                f"Low storage pressure alert: P_pl={p_plant:.2f}, P_st={p_storage:.2f}, sending mail"
+                            )
                             result, error_msg = send_mail(subject, content)
                             if result:
-                                print(f"[EMAIL] 메일 전송 성공 - 압력 임계값 미만 알림")
+                                flog.info("Low pressure alert email sent")
                             else:
-                                print(f"[EMAIL] 메일 전송 실패 - 압력 임계값 미만 알림")
-                                print(f"[EMAIL] 실패 원인: {error_msg}")
+                                flog.error(f"Low pressure alert email failed: {error_msg}")
                                 alert_message = f"Failed to send pressure alert email"
                                 if error_msg:
                                     alert_message += f"\n\nError: {error_msg}"
                                 self.show_email_alert(alert_message)
                 except (IndexError, TypeError) as e:
-                    print(f"Error checking pressure: {e}")
+                    flog.error(f"Error checking pressure: {e}")
 
         if (len(self.arduino_deque.time_1hour) > 0 and
                 loop_start_time - self.arduino_deque.get_last_1hour_time().timestamp() < expected_exc_delay):
@@ -326,7 +327,7 @@ class PressureLevelPlotter:
                 time.sleep(sleep_time)
 
             except Exception as e:
-                print(f"[ERROR] fetch_loop() 에러: {e}")
+                flog.critical(f"fetch_loop() error: {e}")
                 time.sleep(1)  # 에러 발생 시 1초 대기
 
     def start(self):
@@ -348,8 +349,8 @@ class PressureLevelPlotter:
         default_order = [0, 1, 2, 3]
         default_visible = [True, True, True, True]
 
-        config_path = _get_writable_path("plotter_config.json")
-        legacy_path = _get_writable_path("calibration.json")
+        config_path = writable_path("plotter_config.json")
+        legacy_path = writable_path("calibration.json")
 
         # ── Migrate from legacy calibration.json ────────────────────────────
         if not os.path.exists(config_path) and os.path.exists(legacy_path):
@@ -359,14 +360,14 @@ class PressureLevelPlotter:
                 calibrations = self._parse_calibrations(legacy)
                 self._write_config(calibrations, default_order, default_visible)
                 os.remove(legacy_path)
-                print("[CONFIG] Migrated calibration.json → plotter_config.json")
+                flog.info("Migrated calibration.json → plotter_config.json")
                 return {
                     "calibrations": calibrations,
                     "channel_order": default_order,
                     "channel_visible": default_visible,
                 }
             except Exception as e:
-                print(f"[CONFIG] Migration failed: {e}")
+                flog.error(f"Config migration failed: {e}")
 
         # ── Load plotter_config.json ─────────────────────────────────────────
         try:
@@ -404,7 +405,7 @@ class PressureLevelPlotter:
         return result
 
     def _write_config(self, calibrations: list[dict], order: list[int], visible: list[bool]) -> None:
-        path = _get_writable_path("plotter_config.json")
+        path = writable_path("plotter_config.json")
         data = {
             "calibrations": {CHANNEL_KEYS[i]: calibrations[i] for i in range(4)},
             "channel_order": order,
@@ -417,7 +418,7 @@ class PressureLevelPlotter:
         try:
             self._write_config(self.calibrations, self.last_positions, self.is_plot)
         except Exception as e:
-            print(f"[ERROR] Failed to save plotter_config.json: {e}")
+            flog.error(f"Failed to save plotter_config.json: {e}")
 
     def apply_calibration(self, channel_index: int, raw: float) -> float:
         cal = self.calibrations[channel_index]
@@ -447,7 +448,8 @@ class PressureLevelPlotter:
 
     def _iter_log_file_paths(self, oldest: datetime):
         """Yield daily log file paths from ``oldest`` through today."""
-        if not os.path.isdir(_LOG_DIR):
+        log_dir = writable_path(_LOG_DIR_NAME)
+        if not os.path.isdir(log_dir):
             return
 
         current_day = oldest.date()
@@ -456,7 +458,7 @@ class PressureLevelPlotter:
 
         while current_day <= end_day:
             path = os.path.join(
-                _LOG_DIR,
+                log_dir,
                 f"{current_day.year:04d}",
                 f"{current_day.month:02d}",
                 f"{current_day.day:02d}.txt",
@@ -494,7 +496,7 @@ class PressureLevelPlotter:
                         ]
                         records.append((dt, raw))
             except OSError as e:
-                print(f"[LOG] Failed to read {path}: {e}")
+                flog.error(f"Failed to read data log {path}: {e}")
 
         records.sort(key=lambda item: item[0])
         return records
@@ -567,6 +569,19 @@ class PressureLevelPlotter:
             'timestamp': current_time
         }
 
+    def _log_arduino_status(self, message: str, *, level: str = "error") -> None:
+        """Log Arduino fetch issues only when status changes (avoid 1 Hz spam)."""
+        status = self.arduino_status_code
+        if status == self._last_logged_arduino_status:
+            return
+        self._last_logged_arduino_status = status
+        if level == "caution":
+            flog.caution(message)
+        elif level == "critical":
+            flog.critical(message)
+        else:
+            flog.error(message)
+
     def get_data_from_arduino(self):
         # Arduino가 비활성화되어 있으면 즉시 [0,0,0,0] 반환
         if self.enable_arduino.get() == 0:
@@ -578,12 +593,15 @@ class PressureLevelPlotter:
             try:
                 simulation_data = self.get_simulation_data()
                 self.arduino_status_code = 200  # 성공 상태
+                if self._last_logged_arduino_status != 200:
+                    flog.info("Arduino simulation data OK")
+                    self._last_logged_arduino_status = 200
                 list_of_str = [simulation_data['P_st'], simulation_data['P_pl'], simulation_data['V_pl'], simulation_data['P_pur']]
                 result = [float(x.split(' ')[0]) for x in list_of_str]
                 return result
             except Exception as e:
                 self.arduino_status_code = 'SimulationError'
-                print(f"[ERROR] 시뮬레이션 에러: {e}")
+                self._log_arduino_status(f"Simulation error: {e}")
                 return [0, 0, 0, 0]
 
         # 실제 Arduino 데이터 가져오기 (기존 코드)
@@ -593,7 +611,9 @@ class PressureLevelPlotter:
             self.arduino_status_code = response.status_code
 
             if response.status_code != 200:
-                print(f"[ERROR] Arduino에서 데이터 가져오기 실패: {response.status_code}")
+                self._log_arduino_status(
+                    f"Arduino fetch failed: HTTP {response.status_code}"
+                )
                 return [0, 0, 0, 0]
 
             json_data = response.json()
@@ -601,19 +621,19 @@ class PressureLevelPlotter:
             # 타임스탬프 검증을 더 안전하게
             if 'timestamp' not in json_data:
                 self.arduino_status_code = 'InvalidData'
-                print("[ERROR] 잘못된 데이터 형식")
+                self._log_arduino_status("Invalid Arduino data format (missing timestamp)")
                 return [0, 0, 0, 0]
 
             if time.time() - json_data['timestamp'] > 5:
                 self.arduino_status_code = 'DataTooOld'
-                print("[ERROR] 데이터가 너무 오래됨")
+                self._log_arduino_status("Arduino data is too old", level="caution")
                 return [0, 0, 0, 0]
 
             # 데이터 파싱을 더 안전하게
             required_fields = ['P_st', 'P_pl', 'V_pl', 'P_pur']
             if not all(field in json_data for field in required_fields):
                 self.arduino_status_code = 'MissingData'
-                print("[ERROR] 필수 데이터 필드 누락")
+                self._log_arduino_status("Arduino response missing required fields")
                 return [0, 0, 0, 0]
 
             list_of_str = [json_data['P_st'], json_data['P_pl'], json_data['V_pl'], json_data['P_pur']]
@@ -621,27 +641,30 @@ class PressureLevelPlotter:
             # 문자열 파싱을 더 안전하게
             try:
                 result = [float(x.split(' ')[0]) for x in list_of_str]
+                if self._last_logged_arduino_status != 200:
+                    flog.info("Arduino data fetch OK")
+                    self._last_logged_arduino_status = 200
                 return result
             except (ValueError, IndexError) as e:
                 self.arduino_status_code = 'ParseError'
-                print(f"[ERROR] 데이터 파싱 에러: {e}")
+                self._log_arduino_status(f"Arduino data parse error: {e}")
                 return [0, 0, 0, 0]
 
         except requests.exceptions.ConnectionError as e:
             self.arduino_status_code = 'ConnectionError'
-            print(f"[ERROR] Arduino 연결 에러: {e}")
+            self._log_arduino_status(f"Arduino connection error: {e}")
         except requests.exceptions.Timeout as e:
             self.arduino_status_code = 'Timeout'
-            print(f"[ERROR] Arduino 타임아웃 에러: {e}")
+            self._log_arduino_status(f"Arduino timeout: {e}")
         except requests.exceptions.HTTPError as e:
             self.arduino_status_code = 'HTTPError'
-            print(f"[ERROR] Arduino HTTP 에러: {e}")
+            self._log_arduino_status(f"Arduino HTTP error: {e}")
         except requests.exceptions.RequestException as e:
             self.arduino_status_code = 'RequestException'
-            print(f"[ERROR] Arduino 요청 에러: {e}")
+            self._log_arduino_status(f"Arduino request error: {e}")
         except Exception as e:
             self.arduino_status_code = 'Critical'
-            print(f"[ERROR] Arduino 치명적 에러: {e}")
+            self._log_arduino_status(f"Arduino critical error: {e}", level="critical")
 
         return [0, 0, 0, 0]
 
@@ -649,10 +672,8 @@ class PressureLevelPlotter:
         values_arduino = self.get_data_from_arduino()
         self.arduino_deque.update_data(values_arduino, time.time())
 
-        # 데이터가 있으면 플롯 업데이트 (Arduino 상태와 관계없이)
-        data_length = len(self.arduino_deque.get_data_deque(Interval.ONE_SECOND))
-        if data_length > 0:
-            # GUI 스레드에서 안전하게 플롯 업데이트
+        # 샘플이 있으면 플롯 업데이트 (채널 수가 아니라 1s 버퍼 길이 기준)
+        if len(self.arduino_deque.time_1s) > 0:
             self.master.after(0, self.safe_update_plot)
 
     def get_interval(self):
@@ -688,7 +709,7 @@ class PressureLevelPlotter:
     def update_plot(self):
         # 더 강력한 데이터 검증
         if not hasattr(self, 'time_arduino_plot') or not hasattr(self, 'data_arduino_plot'):
-            print("[ERROR] Plot 데이터가 초기화되지 않음")
+            flog.error("Plot data is not initialized")
             return
 
         if len(self.time_arduino_plot) <= 2:
@@ -700,16 +721,16 @@ class PressureLevelPlotter:
 
         # 데이터 길이 검증
         if len(self.data_arduino_plot) < 4:
-            print("[ERROR] 데이터 배열이 부족함")
+            flog.error("Data arrays are insufficient")
             return
 
         # 각 데이터 배열의 길이 검증
         for i, data in enumerate(self.data_arduino_plot):
             if len(data) == 0:
-                print(f"[ERROR] 데이터 배열 {i}가 비어있음")
+                flog.error(f"Data array {i} is empty")
                 return
             if len(data) != len(self.time_arduino_plot):
-                print(f"[ERROR] 데이터 배열 {i}의 길이가 시간 배열과 다름")
+                flog.error(f"Data array {i} length mismatches time array")
                 return
 
         self.ax.clear()
@@ -773,7 +794,7 @@ class PressureLevelPlotter:
                 max_pressure = 10
         except ValueError:
             max_pressure = 10
-            print("Warning: Could not calculate max_pressure, using default value")
+            flog.caution("Could not calculate max_pressure, using default value")
 
         if self.enable_localmaxmin.get() == 1:
             self.draw_local_maxmin(self.ax2, max_pressure, calibrated)
@@ -786,7 +807,7 @@ class PressureLevelPlotter:
                 max_volume = 100
         except ValueError:
             max_volume = 100
-            print("Warning: Could not calculate max_volume, using default value")
+            flog.caution("Could not calculate max_volume, using default value")
 
         self.ax.set_ylim(0, max_volume)
         self.ax2.set_ylim(0, max_pressure)
@@ -823,15 +844,15 @@ class PressureLevelPlotter:
         try:
             self.update_xformatter(self.get_interval())
         except Exception as e:
-            print(f"[ERROR] x축 포맷터 설정 에러: {e}")
+            flog.error(f"x-axis formatter setup error: {e}")
 
         try:
             self.set_axes_margin()
         except Exception as e:
-            print(f"[ERROR] 축 마진 설정 에러: {e}")
+            flog.error(f"axes margin setup error: {e}")
 
         if not self.safe_canvas_draw():
-            print("[WARNING] Canvas 업데이트 실패, 그래프 업데이트 건너뜀")
+            flog.caution("Canvas update failed; skipping plot update")
 
     def find_peaks(self, data):
         threshold = 0.1
@@ -921,7 +942,7 @@ class PressureLevelPlotter:
             self.ax.margins(y=0.1)
             self.ax2.margins(y=0.1)
         except Exception as e:
-            print(f"[ERROR] set_axes_margin() 에러: {e}")
+            flog.error(f"set_axes_margin() error: {e}")
 
     def update_xformatter(self, interval: Interval):
         def format_date(x, pos=None):
@@ -935,60 +956,58 @@ class PressureLevelPlotter:
                     result = date.strftime("%H:%M")
                 return result
             except Exception as e:
-                print(f"[ERROR] format_date() 에러: {e}")
+                flog.error(f"format_date() error: {e}")
                 return ""
 
         try:
             locator = CustomDateLocator(interval)
         except Exception as e:
-            print(f"[ERROR] CustomDateLocator 생성 에러: {e}")
+            flog.error(f"CustomDateLocator creation error: {e}")
             from matplotlib.dates import AutoDateLocator
             locator = AutoDateLocator()
 
         try:
             formatter = ticker.FuncFormatter(format_date)
         except Exception as e:
-            print(f"[ERROR] FuncFormatter 생성 에러: {e}")
+            flog.error(f"FuncFormatter creation error: {e}")
             return
 
         try:
             self.ax.xaxis.set_major_locator(locator)
         except Exception as e:
-            print(f"[ERROR] x축 locator 설정 에러: {e}")
+            flog.error(f"x-axis locator setup error: {e}")
             # 에러 발생 시 기본 locator 사용
             try:
                 from matplotlib.dates import AutoDateLocator
                 self.ax.xaxis.set_major_locator(AutoDateLocator())
             except Exception as e2:
-                print(f"[ERROR] 기본 locator 설정도 실패: {e2}")
+                flog.error(f"Fallback locator setup also failed: {e2}")
                 return
 
         try:
             self.ax.xaxis.set_major_formatter(formatter)
         except Exception as e:
-            print(f"[ERROR] x축 formatter 설정 에러: {e}")
+            flog.error(f"x-axis formatter assignment error: {e}")
 
         try:
             self.figure.autofmt_xdate()
         except Exception as e:
-            print(f"[ERROR] autofmt_xdate() 에러: {e}")
+            flog.error(f"autofmt_xdate() error: {e}")
 
     def save_log(self, time: datetime, arduino_data):
         # Apply calibration before logging
         cal = [self.apply_calibration(i, arduino_data[i]) for i in range(4)]
 
-        log_dir = _LOG_DIR
-
         year = time.strftime('%Y')
         month = time.strftime('%m')
         day = time.strftime('%d')
 
-        year_month_dir = os.path.join(log_dir, year, month)
+        year_month_dir = writable_path(_LOG_DIR_NAME, year, month)
         os.makedirs(year_month_dir, exist_ok=True)
 
         log_file_path = os.path.join(year_month_dir, f"{day}.txt")
 
-        with open(log_file_path, "a") as f:
+        with open(log_file_path, "a", encoding="utf-8") as f:
             f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}: {cal[2]:.2f} L, {cal[1]:.2f} psi, {cal[0]:.2f} psi, {cal[3]:.2f} psi\n")
 
     def open_setting(self):
@@ -1029,13 +1048,13 @@ class PressureLevelPlotter:
             self.canvas.draw()
             return True
         except Exception as e:
-            print(f"[ERROR] 안전한 canvas 업데이트 실패: {e}")
+            flog.error(f"Safe canvas update failed: {e}")
             try:
                 # 대안 방법 시도
                 self.canvas.flush_events()
                 return True
             except Exception as e2:
-                print(f"[ERROR] 대안 canvas 업데이트도 실패: {e2}")
+                flog.error(f"Fallback canvas update also failed: {e2}")
                 return False
 
     def on_arduino_checkbox_change(self):
@@ -1060,7 +1079,7 @@ class PressureLevelPlotter:
                 self.update_plot()
 
         except Exception as e:
-            print(f"[ERROR] Arduino checkbox change 에러: {e}")
+            flog.error(f"Arduino checkbox change error: {e}")
             # 에러 발생 시 체크박스를 원래 상태로 되돌림
             self.enable_arduino.set(0)
 
@@ -1071,7 +1090,7 @@ class PressureLevelPlotter:
         try:
             self.fetch_data()
         except Exception as e:
-            print(f"[ERROR] immediate_data_fetch() 에러: {e}")
+            flog.error(f"immediate_data_fetch() error: {e}")
 
     def safe_update_plot(self):
         """
@@ -1088,9 +1107,7 @@ class PressureLevelPlotter:
             if len(self.time_arduino_plot) > 2:
                 self.update_plot()
         except Exception as e:
-            print(f"[ERROR] safe_update_plot() 에러: {e}")
-            import traceback
-            traceback.print_exc()
+            flog.error(f"safe_update_plot() error: {e}")
 
     def _on_close(self) -> None:
         """Handle window close: clean up matplotlib then force-exit.
@@ -1168,22 +1185,11 @@ class PressureLevelPlotter:
             close_button.pack(side=tk.RIGHT)
 
         except Exception as e:
-            print(f"[ERROR] Failed to show email alert window: {e}")
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
+            flog.error(f"Failed to show email alert window: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
-    root.iconbitmap(resource_path("PressureLevelPlotter.ico"))
+    root.iconbitmap(bundle_path("PressureLevelPlotter.ico"))
     app = PressureLevelPlotter(root)
     app.start()
     root.protocol("WM_DELETE_WINDOW", app._on_close)

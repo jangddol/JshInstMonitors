@@ -49,18 +49,16 @@ class CustomDateLocator(Locator):
                     current += timedelta(hours=10)
             
             if iteration_count >= max_iterations:
-                print(f"[WARNING] 최대 반복 횟수 도달, 기본 locator 사용")
                 from matplotlib.dates import AutoDateLocator
                 return AutoDateLocator().tick_values(vmin, vmax)
             
             result = [mdates.date2num(date) for date in dates]
             return result
             
-        except Exception as e:
-            print(f"[ERROR] CustomDateLocator.__call__() 에러: {e}")
+        except Exception:
             # 에러 발생 시 기본 locator 사용
             try:
                 from matplotlib.dates import AutoDateLocator
                 return AutoDateLocator().tick_values(vmin, vmax)
-            except:
+            except Exception:
                 return []

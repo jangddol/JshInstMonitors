@@ -9,6 +9,15 @@ from typing import Any, Optional
 import numpy as np
 import serial
 
+_COMMON_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "common"))
+if _COMMON_DIR not in sys.path:
+    sys.path.insert(0, _COMMON_DIR)
+
+from FuncLogger import FuncLogger
+from paths import writable_path
+
+flog = FuncLogger("pressurelevel", "ArduinoADCReceiver")
+
 CONFIG_FILENAME = "arduinoadcreceiver_config.json"
 
 _DEFAULT_CONFIG: dict[str, Any] = {
@@ -25,12 +34,8 @@ _DEFAULT_CONFIG: dict[str, Any] = {
 
 
 def _get_config_path() -> str:
-    """Return a writable path next to the exe (frozen) or this script (dev)."""
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(sys.executable)
-    else:
-        base = os.path.abspath(os.path.dirname(__file__))
-    return os.path.join(base, CONFIG_FILENAME)
+    """Return a writable path next to the exe (frozen) or entry script (dev)."""
+    return writable_path(CONFIG_FILENAME)
 
 
 def _validate_config(config_data: dict[str, Any]) -> dict[str, Any]:
@@ -70,14 +75,14 @@ def load_config() -> dict[str, Any]:
         with open(config_path, "r", encoding="utf-8") as file:
             config_data = json.load(file)
         config = _validate_config(config_data)
-        print(f"[CONFIG] Loaded {config_path}")
+        flog.info(f"Loaded config {config_path}")
         return config
     except Exception as e:
-        print(f"[CONFIG] {e}; writing default config to {config_path}")
+        flog.caution(f"{e}; writing default config to {config_path}")
         config = dict(_DEFAULT_CONFIG)
         with open(config_path, "w", encoding="utf-8") as file:
             json.dump(config, file, indent=2)
-        print(f"[CONFIG] Created default config at {config_path}")
+        flog.info(f"Created default config at {config_path}")
         return config
 
 
@@ -120,8 +125,9 @@ class SerialMediator:
             self.arduino.flushInput()
             self.arduino.flushOutput()
             print(f"[SERIAL] Connected to {self.port} @ {self.baud_rate} baud")
+            flog.info(f"Connected to {self.port} @ {self.baud_rate} baud")
         except serial.SerialException as e:
-            print(f"Failed to open serial port: {e}")
+            flog.error(f"Failed to open serial port: {e}")
             self.arduino = None
 
     def close_resources(self):
@@ -179,7 +185,7 @@ class SerialMediator:
             self.last_read_time = time.time()
 
         except ValueError as e:
-            print(f"Error processing serial data: {e}")
+            flog.caution(f"Error processing serial data: {e}")
 
     def run(self) -> None:
         """Main loop for serial communication."""
@@ -206,12 +212,12 @@ class SerialMediator:
                 time.sleep(self.loop_sleep)
 
             except serial.SerialException as e:
-                print(f"Serial communication error: {e}")
+                flog.error(f"Serial communication error: {e}")
                 self.arduino = None
                 time.sleep(self.reconnect_delay)
 
             except Exception as e:
-                print(f"Unexpected error: {e}")
+                flog.critical(f"Unexpected error: {e}")
                 self.arduino = None
                 time.sleep(self.reconnect_delay)
 
@@ -248,6 +254,7 @@ def main():
         server_address = ("", localserver_port)
         httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
         print(f"[HTTP] Server started on localhost:{localserver_port}")
+        flog.info(f"HTTP server started on localhost:{localserver_port}")
         httpd.serve_forever()
 
     server_thread = threading.Thread(target=run_simple_server)
@@ -257,6 +264,7 @@ def main():
     try:
         mediator.run()
     except KeyboardInterrupt:
+        flog.info("Shutting down...")
         print("Shutting down...")
     finally:
         mediator.close_resources()
