@@ -1,1 +1,1 @@
-python3 -m PyInstaller --onefile --noconsole -n=PressureLevelPlotter --icon=.\PressureLevelPlotter.ico --add-data "PressureLevelPlotter.ico;." --paths=..\..\common --hidden-import=FuncLogger --hidden-import=paths .\PressureLevelPlotter.py
+python -m PyInstaller --onefile --noconsole -n=PressureLevelPlotter --icon=.\PressureLevelPlotter.ico --add-data "PressureLevelPlotter.ico;." --paths=..\..\common --hidden-import=FuncLogger --hidden-import=paths .\PressureLevelPlotter.py

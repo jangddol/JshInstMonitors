@@ -752,8 +752,6 @@ class FlowTempPlotter:
                 f"{drc91c_data[0]:.2f}, {drc91c_data[1]:.2f}\n"
             )
 
-<<<<<<< HEAD
-=======
     def _on_close(self) -> None:
         """Handle window close: clean up matplotlib then force-exit.
 
@@ -768,7 +766,6 @@ class FlowTempPlotter:
         os._exit(0)
 
 
->>>>>>> 841c9b0e189c28352cdaca55029d8afc80931392
 def open_config_file(file_path: str) -> tuple[int, int]:
     """Open and parse the configuration file.
 

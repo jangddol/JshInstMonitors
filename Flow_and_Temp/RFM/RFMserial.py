@@ -1,6 +1,16 @@
 import enum
+import time
+
 import serial
 from channel import Channel
+from rfm_errors import RFMSerialError, RFMSerialTimeout
+
+# Serial read timeout (seconds). Prevents UI-thread hangs when Arduino is silent.
+# Per-read timeout is short so a dead port cannot stall the Tk tick for long.
+DEFAULT_READ_TIMEOUT_S = 0.25
+DEFAULT_OVERALL_READ_TIMEOUT_S = 0.8
+EXPECTED_LINE_LEN = 34
+
 
 class CMD(enum.Enum):
     # serial command dictionary constant
@@ -21,18 +31,34 @@ class CMD(enum.Enum):
 
 
 class RFMserial_Real:
-    def __init__(self, port, baudrate):
+    def __init__(self, port, baudrate, timeout=DEFAULT_READ_TIMEOUT_S):
         self.port = port
         self.baudrate = baudrate
-        self.ser = serial.Serial(port, baudrate, write_timeout=1, xonxoff=False)
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
+        try:
+            self.ser = serial.Serial(
+                port,
+                baudrate,
+                timeout=timeout,
+                write_timeout=1,
+                xonxoff=False,
+            )
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+        except serial.SerialException as e:
+            raise RFMSerialError(f"Failed to open serial port {port}: {e}") from e
+        except Exception as e:
+            raise RFMSerialError(f"Unexpected error opening serial port {port}: {e}") from e
 
     def __write(self, data):
         """Write data to the serial port after resetting the input buffer."""
-        self.ser.reset_input_buffer()  # Prevent write_timeout issues
-        self.ser.write((data + '\n').encode('ascii'))
-        self.ser.flush()  # Ensure all data is written before proceeding
+        try:
+            self.ser.reset_input_buffer()
+            self.ser.write((data + "\n").encode("ascii"))
+            self.ser.flush()
+        except serial.SerialException as e:
+            raise RFMSerialError(f"Serial write failed: {e}") from e
+        except Exception as e:
+            raise RFMSerialError(f"Unexpected serial write error: {e}") from e
 
     def reset_serial(self):
         self.__write(CMD.CMD_RESET.value)
@@ -47,7 +73,7 @@ class RFMserial_Real:
             self.__write(CMD.CMD_SET_FLOW_SETPOINT_CH3.value)
         elif ch == Channel.CH4:
             self.__write(CMD.CMD_SET_FLOW_SETPOINT_CH4.value)
-    
+
     def writeChannelOn_serial(self, ch):
         if ch == Channel.CH1:
             self.__write(CMD.CMD_SET_CH1_ON.value)
@@ -57,7 +83,7 @@ class RFMserial_Real:
             self.__write(CMD.CMD_SET_CH3_ON.value)
         elif ch == Channel.CH4:
             self.__write(CMD.CMD_SET_CH4_ON.value)
-    
+
     def writeChannelOff_serial(self, ch):
         if ch == Channel.CH1:
             self.__write(CMD.CMD_SET_CH1_OFF.value)
@@ -68,21 +94,41 @@ class RFMserial_Real:
         elif ch == Channel.CH4:
             self.__write(CMD.CMD_SET_CH4_OFF.value)
 
-    def readline_serial(self):
-        lf = b'\n'  # 개행 문자를 바이트로 정의
-        # time.sleep(0.01) # 이걸로 딜레이를 주었더니 잘못 받아오는 확률이 더 늘어났음. 그냥 아래처럼 3번 읽는게 맞는거 같음
-        self.ser.read_until(expected=lf) # 첫 번째 읽기: 현재 라인의 나머지 부분을 읽고 버립니다
-        self.ser.read_until(expected=lf) # 두 번째 읽기: 딜레이를 주기 위한 잉여 읽기
-        line = self.ser.read_until(expected=lf).decode('ascii').strip() # 세 번째 읽기: 온전한 새 라인을 읽습니다
-        while not line or len(line) != 34: # 빈 라인이면 다시 읽습니다
-            line = self.ser.read_until(expected=lf).decode('ascii').strip()
+    def _read_until_lf(self):
+        lf = b"\n"
         try:
-            parsed_numbers = [line[i:i+4] for i in range(0, len(line), 4)]
-            print(line, " ", parsed_numbers, " ", len(line))
+            raw = self.ser.read_until(expected=lf)
+            return raw.decode("ascii", errors="replace").strip()
+        except serial.SerialException as e:
+            raise RFMSerialError(f"Serial read failed: {e}") from e
         except Exception as e:
-            print(e)
-            line = "0000000000000000"
-        return line
+            raise RFMSerialError(f"Unexpected serial read error: {e}") from e
+
+    def readline_serial(self, overall_timeout=DEFAULT_OVERALL_READ_TIMEOUT_S):
+        """
+        Read one complete flow line.
+
+        Raises RFMSerialTimeout if no valid line arrives within overall_timeout.
+        Raises RFMSerialError on port I/O failures.
+        """
+        deadline = time.monotonic() + overall_timeout
+
+        for _ in range(2):
+            if time.monotonic() >= deadline:
+                raise RFMSerialTimeout(
+                    f"Serial read timeout ({overall_timeout}s) while discarding stale lines"
+                )
+            self._read_until_lf()
+
+        while time.monotonic() < deadline:
+            line = self._read_until_lf()
+            if line and len(line) == EXPECTED_LINE_LEN:
+                return line
+
+        raise RFMSerialTimeout(
+            f"Serial read timeout ({overall_timeout}s): no complete {EXPECTED_LINE_LEN}-char line"
+        )
+
 
 class RFMserial_Sim:
     def __init__(self, port, baudrate):
@@ -114,7 +160,7 @@ class RFMserial_Sim:
             self.channel_state[2] = True
         elif ch == Channel.CH4:
             self.channel_state[3] = True
-    
+
     def writeChannelOff_serial(self, ch):
         if ch == Channel.CH1:
             self.channel_state[0] = False
@@ -129,28 +175,28 @@ class RFMserial_Sim:
         _flows = [int(float(flows) * 4095 / 99) for flows in self.flow_setpoint]
         return "{:04d}{:04d}{:04d}{:04d}".format(_flows[0], _flows[1], _flows[2], _flows[3])
 
-    def readline_serial(self):
+    def readline_serial(self, overall_timeout=DEFAULT_OVERALL_READ_TIMEOUT_S):
         return self.unparse_flow_serial_buffer()
-    
+
 
 class RFMserial:
-    def __init__(self, on, port, baudrate):
+    def __init__(self, on, port, baudrate, timeout=DEFAULT_READ_TIMEOUT_S):
         if on:
-            self.rfmserial = RFMserial_Real(port, baudrate)
+            self.rfmserial = RFMserial_Real(port, baudrate, timeout=timeout)
         else:
             self.rfmserial = RFMserial_Sim(port, baudrate)
-    
+
     def reset_serial(self):
         self.rfmserial.reset_serial()
-    
+
     def writeFlowSetpoint_serial(self, flowSetpoint, ch):
         self.rfmserial.writeFlowSetpoint_serial(flowSetpoint, ch)
-    
+
     def writeChannelOn_serial(self, ch):
         self.rfmserial.writeChannelOn_serial(ch)
-    
+
     def writeChannelOff_serial(self, ch):
         self.rfmserial.writeChannelOff_serial(ch)
-    
-    def readline_serial(self):
-        return self.rfmserial.readline_serial()
+
+    def readline_serial(self, overall_timeout=DEFAULT_OVERALL_READ_TIMEOUT_S):
+        return self.rfmserial.readline_serial(overall_timeout=overall_timeout)
