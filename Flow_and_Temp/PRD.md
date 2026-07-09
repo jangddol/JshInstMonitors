@@ -24,8 +24,9 @@
           [FlowTempPlotter.py — Tkinter GUI]
                     ↓
           · 실시간 그래프 (matplotlib)
-          · 1분 주기 로그 파일 저장
-          · 이상 감지 → 이메일 알림 (CustomMail)
+          · 시작 시 데이터 로그 복원
+          · 1분 주기 데이터 로그 + 기능 로그
+          · 이상 감지 → 이메일 알림 (CustomMail) + 메일 로그
 ```
 
 > NI IEEE 488.2 드라이버(`pyvisa` 백엔드) 설치가 필요하다. (`READ.me` 참조)
@@ -46,6 +47,7 @@
   - Mini 모드: 창 높이를 130 px로 축소
   - 스케줄러: 요일/시각 기반 자동 On·Off·Setpoint 설정
 - HTTP 서버(`localhost:<localserver_port>/get_value`)를 별도 스레드로 실행하여 최신 유량값을 JSON으로 노출한다.
+- config·기능 로그는 exe/스크립트 옆 (`common/paths.writable_path`). 기동·HTTP·스케줄 이상은 `flog_flowtemp/`에 기록한다.
 
 **응답 JSON 스키마**
 
@@ -90,6 +92,7 @@
 - GPIB(`pyvisa`)로 DRC91C에 접속하여 센서 A/B 온도값을 읽는다.
 - Flask HTTP 서버(`0.0.0.0:<port>/sensor_pair`)로 두 채널 온도를 JSON 노출한다.
 - 값 포맷: `+XXX.XXK` (8자 문자열), 플로터가 `float(value[1:7])`로 파싱(단위: K).
+- 장비 open 실패·서버 기동 등은 `flog_flowtemp/`에 기록한다.
 
 **설정 파일: `drc91c_config.json`**
 
@@ -108,6 +111,7 @@
 - GPIB `SDAT?` (Head), `CDAT?` (Cold Tip) 명령으로 온도를 읽는다.
 - 값 포맷: `XX.XXX K` (오버로드 시 `OL` → `00.000` 대체)
 - 동일한 `/sensor_pair` 엔드포인트로 노출하므로 `FlowTempPlotter`와 인터페이스가 동일하다.
+- 장비 open 실패·서버 기동 등은 `flog_flowtemp/`에 기록한다.
 
 **설정 파일: `lakeshore330_config.json`**
 
@@ -125,7 +129,10 @@
 - Tkinter 윈도우 + matplotlib TkAgg 백엔드를 사용한다.
 - 별도 스레드(`fetch_loop`)가 1초마다 두 HTTP 서버를 폴링하여 `VariousTimeDeque`에 저장한다.
 - GUI 메인 루프는 200 ms 주기로 `update_display`를 호출한다.
-- 포트 설정은 `flowtempplotter_config.json`에서 관리한다.
+- 포트 설정은 `flowtempplotter_config.json`에서 관리한다 (exe/스크립트 옆).
+- **시작 시 로그 복원**: `log_flowtemp/`의 1분 주기 로그를 읽어 RFM·DRC91C deque를 각 인터벌의 `N × T` 윈도우만큼 채운다.
+- 운영 이벤트는 `common/FuncLogger`로 `flog_flowtemp/YYYY/MM/DD.txt`에 기록한다.
+- Pressure와 달리 캘리브레이션 창·Local Max/Min·메일 실패 GUI 팝업은 없다 (의도적).
 
 **표시 채널**
 
@@ -174,17 +181,20 @@
 
 | 조건 | 체크 주기 | 알림 내용 |
 |---|---|---|
-| RFM HTTP 연결 끊김 | 10분 | "MKS247C is disconnected" |
-| DRC91C HTTP 연결 끊김 | 10분 | "Temperature controller is disconnected" |
+| RFM HTTP 연결 끊김 (`Off`/`Connecting` 제외) | 10분 | "MKS247C is disconnected" |
+| DRC91C HTTP 연결 끊김 (`Off`/`Connecting` 제외) | 10분 | "Temperature controller is disconnected" |
 
-- 발송 결과는 `maillog.txt`에 기록된다.
+- 발송 결과(성공/실패·stage)는 `maillog_flowtemp.txt`에 기록된다.
+- 메일 실패 시 GUI 팝업은 표시하지 않는다 (기능 로그·메일 로그만).
 
 ---
 
 ## 6. 로그 저장
 
+### 데이터 로그
+
 - 저장 주기: 1분마다 (`VariousTimeDeque`의 1분 버퍼 갱신 시점)
-- 저장 경로: `log_flowtemp/YYYY/MM/DD.txt`
+- 저장 경로: `log_flowtemp/YYYY/MM/DD.txt` (exe/스크립트 옆)
 - 저장 형식:
 
 ```
@@ -193,12 +203,19 @@
 
 필드 순서: `Tip`, `Shield`, `Bypass`, `Pumping` (L/min), `Head`, `Cold Tip` (K)
 
+### 기능 로그
+
+- 경로: `flog_flowtemp/YYYY/MM/DD.txt`
+- 소스 태그: `FlowTempPlotter`, `RFMdaemon`, `DRC91Cdaemon`, `Lakeshore330`
+- 레벨: `INFO` / `CAUTION` / `ERROR` / `CRITICAL`
+
 ---
 
 ## 7. 빌드 및 배포
 
-- PyInstaller로 단일 exe 빌드를 지원한다 (`FlowTempPlotter/makefile.bat`, `RFM/makefile.bat`).
-- `resource_path()`가 개발 환경과 PyInstaller `_MEIPASS` 환경 모두에서 리소스 경로를 올바르게 반환한다.
+- PyInstaller로 단일 exe 빌드를 지원한다 (`FlowTempPlotter/makefile.bat`, `RFM/makefile.bat`, `DRC91C/makefile.bat`, `Lakeshore330/makefile.bat`).
+- GUI Plotter는 `--noconsole`, 콘솔 데몬(DRC91C/Lakeshore)은 콘솔을 유지한다.
+- `common/paths.bundle_path()` / `writable_path()`로 아이콘·config·로그 경로를 통일한다.
 - `RFMserial.py`는 실제 시리얼(`RFMserial_Real`) / 시뮬레이션(`RFMserial_Sim`) 두 구현체를 `RFMserial` 래퍼로 전환한다. `SERIAL_ON = False`로 설정하면 시뮬 모드로 동작한다.
 
 ---
@@ -208,20 +225,24 @@
 ```
 Flow_and_Temp/
 ├── FlowTempPlotter/
-│   ├── FlowTempPlotter.py       # GUI 메인
-│   ├── VariousTimeDeque.py      # 멀티 인터벌 링 버퍼
+│   ├── FlowTempPlotter.py       # GUI 메인 (+ 로그 복원)
+│   ├── VariousTimeDeque.py      # 멀티 인터벌 링 버퍼 (+ load_historical)
 │   ├── CustomDateLocator.py     # x축 눈금 위치 계산
-│   ├── CustomMail.py            # SMTP 이메일 발송
-│   └── makefile.bat             # PyInstaller 빌드 스크립트
+│   ├── CustomMail.py            # SMTP 이메일 발송 + maillog_flowtemp.txt
+│   └── makefile.bat
 ├── RFM/
 │   ├── RFMdaemon.py             # MFC 제어 GUI + HTTP 서버
 │   ├── RFMserial.py             # Arduino 시리얼 통신
 │   ├── channel.py               # 채널 Enum 정의
 │   ├── schedularwindow.py       # 스케줄러 GUI
-│   ├── makefile.bat             # PyInstaller 빌드 스크립트
+│   ├── makefile.bat
 │   └── RFM_arduino/             # Arduino 펌웨어 (MKS247C 제어)
 ├── DRC91C/
-│   └── DRC91Cdaemon.py          # GPIB → Flask HTTP:5001
+│   ├── DRC91Cdaemon.py          # GPIB → Flask HTTP:5001
+│   └── makefile.bat
 └── Lakeshore330/
-    └── Lakeshore330.py          # GPIB → HTTP:5001 (DRC91C 대체)
+    ├── Lakeshore330.py          # GPIB → HTTP:5001 (DRC91C 대체)
+    └── makefile.bat
 ```
+
+공통 모듈: `../../common/paths.py`, `../../common/FuncLogger.py`

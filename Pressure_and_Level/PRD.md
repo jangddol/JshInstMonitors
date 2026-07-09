@@ -18,8 +18,9 @@
 [PressureLevelPlotter.py — Tkinter GUI]
         ↓
   · 실시간 그래프 (matplotlib)
-  · 1분 주기 로그 파일 저장
-  · 이상 감지 → 이메일 알림 (CustomMail)
+  · 시작 시 데이터 로그 복원
+  · 1분 주기 데이터 로그 + 기능 로그
+  · 이상 감지 → 이메일 알림 (CustomMail) + 메일 로그
 ```
 
 ---
@@ -38,8 +39,10 @@
 ### 3-2. `ArduinoADCReceiver.py` (수신 데몬)
 
 - Serial 포트·HTTP 포트 등은 `arduinoadcreceiver_config.json`에서 읽는다. 파일이 없거나 잘못되면 기본값으로 자동 생성한다.
+- 설정·기능 로그는 실행 파일(또는 스크립트)과 같은 디렉터리 기준이다 (`common/paths.writable_path`).
 - 수신값에 소프트웨어 지수 필터(β = `exp(-2π × arduino_period / filter_cutoff_second)`)를 추가 적용한다.
 - `localhost:<localserver_port>/Meas` HTTP GET 엔드포인트로 최신 측정값을 JSON 노출한다.
+- 기동·시리얼 연결/실패·HTTP 시작·종료 등은 `flog_pressurelevel/` 기능 로그에 기록한다.
 
 **변환 공식**
 
@@ -93,8 +96,9 @@
 
 
 - Tkinter 윈도우 + matplotlib TkAgg 백엔드를 사용한다.
-- 별도 스레드(`fetch_loop`)가 1초마다 HTTP 데이터를 수집하여 `VariousTimeDeque`에 저장한다.
+- 별도 스레드(`fetch_loop`)가 1초마다 HTTP 데이터를 수집하여 `VariousTimeDeque`에 저장한다. 1초 버퍼에 샘플이 있을 때만 GUI 플롯 갱신을 예약한다.
 - GUI 메인 루프는 200 ms 주기로 `update_display`를 호출한다.
+- 운영 이벤트는 `common/FuncLogger`로 `flog_pressurelevel/YYYY/MM/DD.txt`에 기록한다 (`print` 기반 콘솔 로그에 의존하지 않음).
 - **시작 시 로그 복원**: `log_pressurelevel/`에 저장된 1분 주기 로그가 있으면, 각 인터벌 버퍼의 `N × T` 윈도우(예: 1 s → 100 s, 1 hour → 100 h) 안의 기록만 읽어 deque를 채운다. 로그에는 calibrated 값이 저장되므로, deque에 넣기 전 `reverse_calibration()`으로 raw로 되돌린다. 해당 구간에 로그가 없으면 버퍼는 비어 있거나 0으로 초기화된다.
 
 **표시 채널**
@@ -146,26 +150,34 @@ Setting 창에서 채널별 **Cal** 버튼을 눌러 열 수 있는 논모달 `t
 
 | 조건 | 체크 주기 | 알림 내용 |
 |---|---|---|
-| Arduino HTTP 연결 끊김 | 10분 | "Arduino is disconnected" |
+| Arduino HTTP 연결 끊김 (`Off`/`Connecting` 제외) | 10분 | "Arduino is disconnected" |
 | P_plant > 3.0 psi **또는** P_storage > 9.0 psi | 10분 | "Pressure is too high" |
-| P_plant < 0.25 psi | 10분 | "Storage Pressure is too low" |
+| P_storage < 0.25 psi | 10분 | "Storage Pressure is too low" |
 
 - 이메일 발송 실패 시 GUI에 논모달 경고 창(`show_email_alert`)을 표시한다.
-- 발송 결과(성공/실패)는 `maillog.txt`에 기록된다.
+- 발송 결과(성공/실패·stage)는 `maillog_pressurelevel.txt`에 기록된다.
 
 ---
 
 ## 5. 로그 저장
 
+### 데이터 로그
+
 - 저장 주기: 1분마다 (`VariousTimeDeque`의 1분 버퍼 갱신 시점)
-- 저장 경로: `log_pressurelevel/YYYY/MM/DD.txt`
+- 저장 경로: `log_pressurelevel/YYYY/MM/DD.txt` (exe/스크립트 옆)
 - 저장 형식:
 
 ```
 2024-11-01 14:30:00: 72.30 L, 1.46 psi, 6.12 psi, 1.20 psi
 ```
 
-필드 순서: `V_plant`, `P_plant`, `P_storage`, `P_purifier`
+필드 순서: `V_plant`, `P_plant`, `P_storage`, `P_purifier` (캘리브레이션 적용값)
+
+### 기능 로그
+
+- 경로: `flog_pressurelevel/YYYY/MM/DD.txt`
+- 소스 태그: `PressureLevelPlotter`, `ArduinoADCReceiver`
+- 레벨: `INFO` / `CAUTION` / `ERROR` / `CRITICAL`
 
 ---
 
@@ -220,8 +232,9 @@ Setting 창에서 채널별 **Cal** 버튼을 눌러 열 수 있는 논모달 `t
 
 ## 7. 빌드 및 배포
 
-- PyInstaller로 단일 exe 빌드를 지원한다 (`makefile.bat`).
-- `resource_path()`가 개발 환경과 PyInstaller `_MEIPASS` 환경 모두에서 리소스 경로를 올바르게 반환한다.
+- PyInstaller로 단일 exe 빌드를 지원한다 (`makefile.bat`). GUI Plotter는 `--noconsole`, 수신 데몬은 콘솔을 유지한다.
+- `common/paths.bundle_path()`가 개발 환경과 PyInstaller `_MEIPASS` 환경 모두에서 아이콘 등 리소스 경로를 반환한다.
+- config·데이터 로그·기능 로그·메일 로그는 `writable_path()`로 **exe 옆**에 기록한다.
 - 테스트 모드: `PressureLevelPlotter.py` 상단의 `IS_TEST = True`로 설정하면 사인파 기반 시뮬레이션 데이터를 사용한다.
 
 ---
@@ -233,14 +246,17 @@ Pressure_and_Level/
 ├── ArduinoADCReceiver/
 │   ├── ArduinoADCReceiver.ino          # Arduino 펌웨어
 │   ├── ArduinoADCReceiver.py           # Serial → HTTP 브릿지
-│   └── arduinoadcreceiver_config.json  # 실행 시 자동 생성 — Serial/HTTP 설정
+│   ├── arduinoadcreceiver_config.json  # 실행 시 자동 생성 — Serial/HTTP 설정
+│   └── makefile.bat
 └── PressureLevelPlotter/
     ├── PressureLevelPlotter.py  # GUI 메인
     ├── PressureLevelSetting.py  # 설정 창 (채널 순서·표시·Cal 버튼)
     ├── CalibrationWindow.py     # 채널별 캘리브레이션 창
-    ├── VariousTimeDeque.py      # 멀티 인터벌 링 버퍼
+    ├── VariousTimeDeque.py      # 멀티 인터벌 링 버퍼 (+ 로그 복원)
     ├── CustomDateLocator.py     # x축 눈금 위치 계산
-    ├── CustomMail.py            # SMTP 이메일 발송
+    ├── CustomMail.py            # SMTP 이메일 발송 + maillog_pressurelevel.txt
     ├── plotter_config.json      # 실행 시 자동 생성 — 캘리브레이션·채널 설정
     └── makefile.bat             # PyInstaller 빌드 스크립트
 ```
+
+공통 모듈: `../../common/paths.py`, `../../common/FuncLogger.py`
