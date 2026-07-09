@@ -258,6 +258,91 @@ def test_syntax_all_modules() -> None:
             check(f"syntax {name}", False, str(e))
 
 
+def test_gui_input_fixes() -> None:
+    print("\n[9] GUI number-input fixes (1-6)")
+    from FuncLogger import FuncLogger
+    from rfm_controller import RFMController, ToggleState
+    from channel import Channel
+    from RFMdaemon import RFMApp, COLUMNNUM
+
+    flog = FuncLogger("flowtemp", "RFM_test")
+    c = RFMController(False, "COM99", 99, 4095, flog)
+
+    # (1) SelectChannel is recoverable via channel map
+    c.toggle_switch(0, last_switch_state=False)
+    check("SelectChannel when no channel", c.toggleStates[0] == ToggleState.SelectChannel)
+    c.channelsEntry[0] = "1"
+    ok = c.apply_changed_channel(0)
+    check("apply channel returns True", ok is True)
+    check("channel mapped to CH1", c.channels[0] == Channel.CH1)
+    check("SelectChannel cleared to Off", c.toggleStates[0] == ToggleState.Off)
+
+    # (4) invalid channel feedback
+    c.channelsEntry[0] = "9"
+    ok2 = c.apply_changed_channel(0)
+    check("invalid channel returns False", ok2 is False)
+    check("invalid keeps previous channel", c.channels[0] == Channel.CH1)
+    check("invalid keeps typed buffer", c.channelsEntry[0] == "9")
+
+    # GUI helpers without Tk mainloop
+    app = RFMApp.__new__(RFMApp)
+    app.mn = False
+    app.width = COLUMNNUM * 235
+    app.height = 385
+    app.ctrl = c
+
+    # (2) arrow / Tab navigation
+    check("Tab 1->2", app.get_highlight_entry_using_keycode("Tab", 1) == 2)
+    check("Right wrap 8->1", app.get_highlight_entry_using_keycode("Right", 8) == 1)
+    check("Left wrap 1->8", app.get_highlight_entry_using_keycode("Left", 1) == 8)
+    check("Down 1->5", app.get_highlight_entry_using_keycode("Down", 1) == 5)
+    check("Up 5->1", app.get_highlight_entry_using_keycode("Up", 5) == 1)
+    check("Down on channel stays", app.get_highlight_entry_using_keycode("Down", 5) == 5)
+
+    # (5) length limits
+    check(
+        "setpoint max_len blocks",
+        app.modify_number_string_by_key("99", "1", "1", max_len=2) == "99",
+    )
+    check(
+        "channel max_len 1",
+        app.modify_number_string_by_key("1", "2", "2", max_len=1) == "1",
+    )
+    check(
+        "backspace works",
+        app.modify_number_string_by_key("12", "BackSpace", "", max_len=2) == "1",
+    )
+
+    # (3) change_highlight must not wipe drafts — verify method body no longer clears
+    src = open(os.path.join(RFM_DIR, "RFMdaemon.py"), encoding="utf-8").read()
+    # crude: after change_highlight_entry_to, clearing flowSetPoint_Entry should be gone
+    import re
+
+    m = re.search(
+        r"def change_highlight_entry_to\(self, entry\):(.*?)(?=\ndef |\Z)",
+        src,
+        re.S,
+    )
+    body = m.group(1) if m else ""
+    check("highlight does not clear flowSetPoint_Entry", "flowSetPoint_Entry" not in body)
+    check("highlight does not clear channelsEntry", "channelsEntry" not in body)
+
+    # (6) mini mode mouse hit-test disabled
+    app.mn = True
+    check("mini mouse row is -1", app.get_row_index_from_mouse(200) == -1)
+    check(
+        "mini mouse no highlight",
+        app.get_highlited_entry_from_mouse(100, 200) == 0,
+    )
+
+    # SelectChannel allows channel edit
+    c2 = RFMController(False, "COM99", 99, 4095, flog)
+    c2.toggleStates[0] = ToggleState.SelectChannel
+    app.ctrl = c2
+    check("can edit channel in SelectChannel", app._can_edit_channel(0) is True)
+    check("cannot edit setpoint in SelectChannel", app._can_edit_setpoint(0) is False)
+
+
 def main() -> int:
     print("=== RFM change verification ===")
     tests = [
@@ -269,6 +354,7 @@ def main() -> int:
         test_gui_error_helpers_exist,
         test_makefile_and_conflict_cleanup,
         test_syntax_all_modules,
+        test_gui_input_fixes,
     ]
     for fn in tests:
         try:

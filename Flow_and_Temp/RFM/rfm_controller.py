@@ -123,7 +123,8 @@ class RFMController:
             self._read_ok_count += 1
             if self._read_ok_count == 1 or self._read_ok_count % self._read_log_every == 0:
                 self.flog.info(
-                    f"read_flow_values: ok #{self._read_ok_count} len={len(serial_buffer)}"
+                    f"read_flow_values: ok #{self._read_ok_count} "
+                    f"len={len(serial_buffer)} raw={serial_buffer}"
                 )
             return flow_values
         except RFMControllerError:
@@ -164,17 +165,27 @@ class RFMController:
             raise RFMControllerError(f"Setpoint write failed: {e}") from e
         self.flowSetPoints_Shown[index] = self.flowSetPoint_Entry[index]
 
-    def apply_changed_channel(self, index: int) -> None:
-        channelEntry_int = 0
+    def apply_changed_channel(self, index: int) -> bool:
+        """Map typed channel number. Returns True on success (1-4), False if invalid."""
+        raw = self.channelsEntry[index]
         try:
-            channelEntry_int = int(self.channelsEntry[index])
+            channelEntry_int = int(raw) if raw != "" else 0
         except Exception:
-            pass
+            channelEntry_int = 0
+
+        channel = convert_int_to_channel(channelEntry_int)
+        if channel == Channel.CH_UNKNOWN:
+            self.flog.caution(f"channel map col{index}: invalid '{raw}' (need 1-4)")
+            return False
+
         self.channelsEntry[index] = ""
-        self.channels[index] = convert_int_to_channel(channelEntry_int)
+        self.channels[index] = channel
+        self.flowSetPoints_Shown[index] = "paused"
+        # Leave SelectChannel (need-channel-first) so channel input / On work again.
+        if self.toggleStates[index] == ToggleState.SelectChannel:
+            self.toggleStates[index] = ToggleState.Off
         self.flog.info(f"channel map col{index} -> {self.channels[index].value}")
-        if self.channels[index] != Channel.CH_UNKNOWN:
-            self.flowSetPoints_Shown[index] = "paused"
+        return True
 
     def toggle_switch(self, switch_index: int, last_switch_state: bool) -> None:
         """Apply On/Off logic. last_switch_state True means currently ON (sunken)."""
@@ -198,8 +209,10 @@ class RFMController:
                 raise RFMControllerError(f"Channel Off failed: {e}") from e
         else:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
+                # SelectChannel: button stays Off; channel digits are accepted until mapped.
                 self.toggleStates[switch_index] = ToggleState.SelectChannel
-                self.flog.caution(f"toggle col{switch_index}: need channel first")
+                self.flowSetPoints_Shown[switch_index] = "Set Channel"
+                self.flog.caution(f"toggle col{switch_index}: need channel first (SelectChannel)")
                 return
 
             self.toggleStates[switch_index] = ToggleState.On

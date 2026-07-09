@@ -236,11 +236,13 @@ class RFMApp:
         if state:
             self.switchs_toggle[index].config(relief="raised", text="OFF")
         else:
-            # Only show ON if controller actually turned on (channel may be missing)
             if self.ctrl.toggleStates[index] == ToggleState.On:
                 self.switchs_toggle[index].config(relief="sunken", text="ON")
             else:
                 self.switchs_toggle[index].config(relief="raised", text="OFF")
+                # Need channel first: focus that column's channel entry for typing.
+                if self.ctrl.toggleStates[index] == ToggleState.SelectChannel:
+                    self.change_highlight_entry_to(ENTRY_HIGHLIGHTED_CH_TIP + index)
 
     def on_mini_toggle(self):
         if self.mini_toggle.config("relief")[-1] == "sunken":
@@ -417,11 +419,34 @@ class RFMApp:
         return key_code in ("Tab", "Left", "Right", "Up", "Down")
 
     def get_highlight_entry_using_keycode(self, key_code, highlighted_entry):
-        if key_code == "Tab":
-            highlighted_entry = highlighted_entry + 1
-        if highlighted_entry == COLUMNNUM * 2 + 1:
-            highlighted_entry = 1
+        """Navigate the 8 editable fields: setpoint row 1-4, channel row 5-8."""
+        n = COLUMNNUM * 2
+        if highlighted_entry < 1 or highlighted_entry > n:
+            return 1
+
+        if key_code in ("Tab", "Right"):
+            return 1 if highlighted_entry >= n else highlighted_entry + 1
+        if key_code == "Left":
+            return n if highlighted_entry <= 1 else highlighted_entry - 1
+        if key_code == "Down":
+            if highlighted_entry <= COLUMNNUM:
+                return highlighted_entry + COLUMNNUM
+            return highlighted_entry
+        if key_code == "Up":
+            if highlighted_entry > COLUMNNUM:
+                return highlighted_entry - COLUMNNUM
+            return highlighted_entry
         return highlighted_entry
+
+    def _can_edit_setpoint(self, index: int) -> bool:
+        return self.ctrl.toggleStates[index] == ToggleState.On
+
+    def _can_edit_channel(self, index: int) -> bool:
+        # Off: normal channel assign. SelectChannel: recover from need-channel-first.
+        return self.ctrl.toggleStates[index] in (ToggleState.Off, ToggleState.SelectChannel)
+
+    def _setpoint_max_len(self) -> int:
+        return max(1, len(str(self.ctrl.pc_input_max)))
 
     def key_pressed(self, event):
         entry_flowset_list = [
@@ -443,30 +468,43 @@ class RFMApp:
         elif event.keysym in ("Return", "Enter"):
             try:
                 for i, entry_flowset in enumerate(entry_flowset_list):
-                    if self.highlighted_entry == entry_flowset and c.toggleStates[i] == ToggleState.On:
+                    if self.highlighted_entry == entry_flowset and self._can_edit_setpoint(i):
                         c.update_flow_setpoint(i)
                 for i, entry_channel in enumerate(entry_channel_list):
-                    if self.highlighted_entry == entry_channel and c.toggleStates[i] == ToggleState.Off:
-                        c.apply_changed_channel(i)
+                    if self.highlighted_entry == entry_channel and self._can_edit_channel(i):
+                        ok = c.apply_changed_channel(i)
+                        if not ok:
+                            self.show_error_popup(
+                                ValueError("Channel must be an integer 1-4"),
+                                title="Channel Input Error",
+                            )
             except RFMError as e:
                 self.show_error_popup(e, title="Input Apply Error")
         else:
             for i, entry_flowset in enumerate(entry_flowset_list):
-                if self.highlighted_entry == entry_flowset and c.toggleStates[i] == ToggleState.On:
+                if self.highlighted_entry == entry_flowset and self._can_edit_setpoint(i):
                     c.flowSetPoint_Entry[i] = self.modify_number_string_by_key(
-                        c.flowSetPoint_Entry[i], event.keysym, event.char
+                        c.flowSetPoint_Entry[i],
+                        event.keysym,
+                        event.char,
+                        max_len=self._setpoint_max_len(),
                     )
             for i, entry_channel in enumerate(entry_channel_list):
-                if self.highlighted_entry == entry_channel and c.toggleStates[i] == ToggleState.Off:
+                if self.highlighted_entry == entry_channel and self._can_edit_channel(i):
                     c.channelsEntry[i] = self.modify_number_string_by_key(
-                        c.channelsEntry[i], event.keysym, event.char
+                        c.channelsEntry[i],
+                        event.keysym,
+                        event.char,
+                        max_len=1,
                     )
 
-    def modify_number_string_by_key(self, number_string, key_code, key):
+    def modify_number_string_by_key(self, number_string, key_code, key, max_len=None):
         if key_code == "BackSpace" and len(number_string) > 0:
-            number_string = number_string[:-1]
+            return number_string[:-1]
         if key.isdigit():
-            number_string += key
+            if max_len is not None and len(number_string) >= max_len:
+                return number_string
+            return number_string + key
         return number_string
 
     def get_column_index_from_mouse(self, mouseX):
@@ -476,21 +514,16 @@ class RFMApp:
         return np.floor(mouseX / columnwidth)
 
     def get_row_index_from_mouse(self, mouseY):
+        # Mini mode only shows sensing readout — no setpoint/channel hit targets.
+        if self.mn:
+            return -1
         SENTINAL_VALUE = -1
-        if not self.mn:
-            if (mouseY < self.height * 266 / HEIGHT) and (mouseY > 139 * self.height / HEIGHT):
-                return 0
-            elif mouseY > self.height * 320 / HEIGHT:
-                return 1
-            else:
-                return SENTINAL_VALUE
+        if (mouseY < self.height * 266 / HEIGHT) and (mouseY > 139 * self.height / HEIGHT):
+            return 0
+        elif mouseY > self.height * 320 / HEIGHT:
+            return 1
         else:
-            if (mouseY < 266) and (mouseY > 139):
-                return 0
-            elif mouseY > 320:
-                return 1
-            else:
-                return SENTINAL_VALUE
+            return SENTINAL_VALUE
 
     def get_highlited_entry_from_mouse(self, mouseX, mouseY):
         if self.get_row_index_from_mouse(mouseY) == -1:
@@ -502,6 +535,7 @@ class RFMApp:
         self.change_highlight_entry_to(highlighted_entry)
 
     def change_highlight_entry_to(self, entry):
+        """Move focus highlight. Draft digit buffers are kept (not cleared on blur)."""
         self.highlighted_entry = entry
         entry_flowset_list = [
             ENTRY_HIGHLIGHTED_FLOWSET_TIP,
@@ -515,21 +549,18 @@ class RFMApp:
             ENTRY_HIGHLIGHTED_CH_BYPASS,
             ENTRY_HIGHLIGHTED_CH_PUMPING,
         ]
-        c = self.ctrl
 
         for i, entry_flowset in enumerate(entry_flowset_list):
             if entry == entry_flowset:
                 self.flowSetPointBkgColors[i] = COLOR_HIGHLIGHTED
             else:
                 self.flowSetPointBkgColors[i] = COLOR_BLACK
-                c.flowSetPoint_Entry[i] = ""
 
         for i, entry_channel in enumerate(entry_channel_list):
             if entry == entry_channel:
                 self.channelBkgColors[i] = COLOR_HIGHLIGHTED
             else:
                 self.channelBkgColors[i] = COLOR_BLACK
-                c.channelsEntry[i] = ""
 
 
 def open_config_file(file_path: str):

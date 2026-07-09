@@ -123,6 +123,8 @@ class RFMserial_Real:
         while time.monotonic() < deadline:
             line = self._read_until_lf()
             if line and len(line) == EXPECTED_LINE_LEN:
+                # Raw Arduino line for console diagnostics (34 chars when healthy).
+                print(line)
                 return line
 
         raise RFMSerialTimeout(
