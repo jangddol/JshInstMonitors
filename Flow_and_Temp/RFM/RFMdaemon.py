@@ -6,8 +6,8 @@ import sys
 import threading
 import time
 import tkinter as tk
+from datetime import datetime
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-from tkinter import messagebox
 
 import numpy as np
 
@@ -30,6 +30,9 @@ DEFAULT_SERIAL_ON = True
 # graphic constants
 COLUMNWIDTH = 235
 HEIGHT = 385
+STATUS_DEFAULT_HEIGHT = 120
+STATUS_MIN_HEIGHT = 60
+STATUS_MAX_LINES = 200
 FONT_SIZE = 15
 SWITCH_XOFFSET = 10
 SWITCH_YOFFSET = 240
@@ -83,60 +86,152 @@ class RFMApp:
         self.flowSetPointBkgColors = [COLOR_BLACK] * COLUMNNUM
         self.channelBkgColors = [COLOR_BLACK] * COLUMNNUM
         self.schedular_window = None
-        # Same recurring error (e.g. serial timeout every tick) → one popup until cleared.
-        self._last_popup_key = None
+        # Dedupe identical consecutive status lines (serial timeout spam).
+        self._last_status_key = None
+        self._status_line_count = 0
 
         flog.info("RFMApp.__init__: setup_ui")
         self.setup_ui()
-        # Defer first tick so Tk can paint the window before any serial I/O.
+        # Surface any controller startup serial errors before the first tick.
+        for level, message in self.ctrl.drain_ui_events():
+            self.append_status(level, message, to_flog=False)
+        self.ctrl.start_reader()
+        self.master.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Defer first tick so Tk can paint the window before drawing.
         flog.info("RFMApp.__init__: schedule first main_loop via after(0)")
         self.master.after(0, self.main_loop)
         flog.info("RFMApp.__init__: done (mainloop next)")
 
-    def show_error_popup(self, err: BaseException, *, title: str = "RFM Error") -> None:
-        """Surface serial/controller errors to the user. Dedupes identical recurring errors."""
-        key = f"{type(err).__name__}:{err}"
-        if key == self._last_popup_key:
-            return
-        self._last_popup_key = key
-        flog.error(f"GUI popup: {title}: {err}")
+    def on_close(self) -> None:
+        flog.info("RFMApp.on_close: stopping serial reader")
         try:
-            messagebox.showerror(title, str(err), parent=self.master)
-        except Exception as popup_err:
-            flog.critical(f"messagebox failed: {popup_err}")
+            self.ctrl.stop_reader()
+        except Exception as e:
+            flog.caution(f"on_close stop_reader: {e}")
+        self.master.destroy()
 
-    def clear_error_popup_dedupe(self) -> None:
-        self._last_popup_key = None
+    def append_status(self, level: str, message: str, *, to_flog: bool = True) -> None:
+        """Append a critical event to the bottom status pane (scrollable, non-modal)."""
+        key = f"{level}:{message}"
+        if key == self._last_status_key:
+            return
+        self._last_status_key = key
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] [{level}] {message}\n"
+        level_u = level.upper()
+        if to_flog:
+            if level_u == "CRITICAL":
+                flog.critical(message)
+            elif level_u == "ERROR":
+                flog.error(message)
+            elif level_u == "CAUTION":
+                flog.caution(message)
+            else:
+                flog.info(message)
+
+        self.status_text.configure(state=tk.NORMAL)
+        tag = level_u if level_u in ("INFO", "CAUTION", "ERROR", "CRITICAL") else "INFO"
+        self.status_text.insert(tk.END, line, tag)
+        self._status_line_count += 1
+        while self._status_line_count > STATUS_MAX_LINES:
+            self.status_text.delete("1.0", "2.0")
+            self._status_line_count -= 1
+        self.status_text.see(tk.END)
+        self.status_text.configure(state=tk.DISABLED)
+
+    def clear_status_dedupe(self) -> None:
+        """Allow the next identical status line after a successful recovery."""
+        self._last_status_key = None
+
+    def show_status_error(self, err: BaseException, *, title: str = "RFM Error") -> None:
+        """Non-modal replacement for messagebox errors (user actions / unexpected)."""
+        level = "CAUTION" if isinstance(err, RFMSerialTimeout) else "ERROR"
+        self.append_status(level, f"{title}: {err}")
 
     # --- HTTP-facing properties (keep old attribute names for RFMHandler) ---
     @property
     def last_flow_values(self):
-        return self.ctrl.last_flow_values
+        return self.ctrl.get_last_flow_values()
 
     @property
     def last_read_time(self):
-        return self.ctrl.last_read_time
+        return self.ctrl.get_last_read_time()
 
     def setup_ui(self):
-        self.master.geometry(f"{self.width}x{self.height}")
+        total_h = HEIGHT + STATUS_DEFAULT_HEIGHT
+        self.master.geometry(f"{self.width}x{total_h}")
         self.master.resizable(True, True)
         self.master.title("MFC Readout Reader")
+        self.master.minsize(COLUMNNUM * COLUMNWIDTH // 2, MINIHEIGHT + STATUS_MIN_HEIGHT)
 
-        self.canvas = tk.Canvas(self.master, width=self.width, height=self.height, bg="black")
-        self.canvas.pack()
+        self.paned = tk.PanedWindow(
+            self.master,
+            orient=tk.VERTICAL,
+            sashrelief=tk.RAISED,
+            sashwidth=6,
+            bg="#444444",
+            opaqueresize=True,
+        )
+        self.paned.pack(fill=tk.BOTH, expand=True)
+
+        self.control_frame = tk.Frame(self.paned, bg=COLOR_BLACK)
+        self.status_frame = tk.Frame(self.paned, bg="#1a1a1a")
+        self.paned.add(self.control_frame, minsize=MINIHEIGHT, stretch="always")
+        self.paned.add(self.status_frame, minsize=STATUS_MIN_HEIGHT, stretch="never")
+
+        self.canvas = tk.Canvas(
+            self.control_frame,
+            width=self.width,
+            height=HEIGHT,
+            bg=COLOR_BLACK,
+            highlightthickness=0,
+        )
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        status_bar = tk.Frame(self.status_frame, bg="#1a1a1a")
+        status_bar.pack(fill=tk.BOTH, expand=True)
+        self.status_scroll = tk.Scrollbar(status_bar, orient=tk.VERTICAL)
+        self.status_text = tk.Text(
+            status_bar,
+            height=6,
+            wrap=tk.WORD,
+            bg="#111111",
+            fg="#dddddd",
+            insertbackground="#dddddd",
+            font=("Consolas", 9),
+            yscrollcommand=self.status_scroll.set,
+            state=tk.DISABLED,
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=6,
+            pady=4,
+        )
+        self.status_scroll.config(command=self.status_text.yview)
+        self.status_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.status_text.tag_configure("INFO", foreground="#7dcea0")
+        self.status_text.tag_configure("CAUTION", foreground="#f5b041")
+        self.status_text.tag_configure("ERROR", foreground="#ec7063")
+        self.status_text.tag_configure("CRITICAL", foreground="#ff3355")
 
         self.setup_buttons()
         self.setup_bindings()
-        flog.info("setup_ui: canvas + buttons ready")
+        self.master.update_idletasks()
+        try:
+            self.paned.sash_place(0, 0, HEIGHT)
+        except tk.TclError:
+            pass
+        flog.info("setup_ui: paned control + status log ready")
 
     def setup_buttons(self):
+        parent = self.control_frame
         self.switchs_toggle = [
-            tk.Button(self.master, text="OFF", command=lambda i=i: self.on_switch_toggle(i))
+            tk.Button(parent, text="OFF", command=lambda i=i: self.on_switch_toggle(i))
             for i in range(COLUMNNUM)
         ]
-        self.reset_button = tk.Button(self.master, text="RESET", command=self.on_reset_click)
-        self.schedular_button = tk.Button(self.master, text="Schedular", command=self.on_schedular_click)
-        self.mini_toggle = tk.Button(self.master, text="Mini", command=self.on_mini_toggle)
+        self.reset_button = tk.Button(parent, text="RESET", command=self.on_reset_click)
+        self.schedular_button = tk.Button(parent, text="Schedular", command=self.on_schedular_click)
+        self.mini_toggle = tk.Button(parent, text="Mini", command=self.on_mini_toggle)
         self.place_buttons()
 
     def place_buttons(self):
@@ -176,49 +271,55 @@ class RFMApp:
             self.mini_toggle.place(
                 x=MINITOGGLE_XOFFSET, y=MINITOGGLE_YOFFSET, width=MINITOGGLE_WIDTH, height=MINITOGGLE_HEIGHT
             )
+            for btn in self.switchs_toggle:
+                btn.place_forget()
 
     def setup_bindings(self):
         self.master.bind("<Key>", self.key_pressed)
-        self.master.bind("<Button-1>", self.mouse_pressed)
-        self.master.bind("<Configure>", self.on_resize)
+        self.canvas.bind("<Button-1>", self.mouse_pressed)
+        self.control_frame.bind("<Configure>", self.on_control_resize)
 
     def main_loop(self):
+        # Serial reads run on a background thread — this tick only paints + drains status.
         try:
             self.update()
-        except RFMError as e:
-            title = "Serial Timeout" if isinstance(e, RFMSerialTimeout) else "RFM Error"
-            self.show_error_popup(e, title=title)
         except Exception as e:
             flog.critical(f"main_loop update failed: {e}")
-            self.show_error_popup(e, title="Unexpected Error")
+            self.append_status("CRITICAL", f"Unexpected error: {e}")
+        for level, message in self.ctrl.drain_ui_events():
+            # Controller already wrote flog; UI pane only.
+            self.append_status(level, message, to_flog=False)
         self.master.after(UPDATE_INTERVAL_MS, self.main_loop)
 
     def update(self):
         self.draw()
-        try:
-            self.ctrl.last_flow_values = self.ctrl.read_flow_values()
-            self.clear_error_popup_dedupe()
-        except RFMError:
-            # Keep last values on screen; re-raise so main_loop can popup.
-            raise
-        self.displayFlowValues([f"{x:.2f}" for x in self.ctrl.last_flow_values])
+        if self.ctrl.consume_clear_status_dedupe():
+            self.clear_status_dedupe()
+        flow_values = self.ctrl.get_last_flow_values()
+        self.displayFlowValues([f"{x:.2f}" for x in flow_values])
         if self.schedular_window is not None:
-            self.ctrl.handle_schedular(
-                self.schedular_window.schedule_widgets,
-                on_ui_toggle=self.on_switch_toggle,
-            )
+            try:
+                self.ctrl.handle_schedular(
+                    self.schedular_window.schedule_widgets,
+                    on_ui_toggle=self.on_switch_toggle,
+                )
+            except RFMError as e:
+                self.show_status_error(e, title="Schedular Error")
 
     def draw(self):
-        self.master.configure(bg="black")
-        self.width = self.master.winfo_width()
-        self.height = self.master.winfo_height()
+        self.master.configure(bg=COLOR_BLACK)
+        self.control_frame.configure(bg=COLOR_BLACK)
+        self.width = max(self.control_frame.winfo_width(), 1)
+        self.height = max(self.control_frame.winfo_height(), 1)
         self.fillEntryBkgColor()
         self.displayTexts()
         self.place_buttons()
 
-    def on_resize(self, event):
-        self.width = event.width
-        self.height = event.height
+    def on_control_resize(self, event):
+        if event.widget is not self.control_frame:
+            return
+        self.width = max(event.width, 1)
+        self.height = max(event.height, 1)
         if self.width != self.lastwidth or self.height != self.lastheight:
             self.draw()
             self.lastwidth = self.width
@@ -231,7 +332,7 @@ class RFMApp:
         try:
             self.ctrl.toggle_switch(index, state)
         except RFMError as e:
-            self.show_error_popup(e, title="Channel Toggle Error")
+            self.show_status_error(e, title="Channel Toggle Error")
             return
         if state:
             self.switchs_toggle[index].config(relief="raised", text="OFF")
@@ -245,15 +346,32 @@ class RFMApp:
                     self.change_highlight_entry_to(ENTRY_HIGHLIGHTED_CH_TIP + index)
 
     def on_mini_toggle(self):
+        status_h = STATUS_DEFAULT_HEIGHT
+        try:
+            sash_y = self.paned.sash_coord(0)[1]
+            total = max(self.master.winfo_height(), 1)
+            status_h = max(STATUS_MIN_HEIGHT, total - sash_y)
+        except tk.TclError:
+            pass
         if self.mini_toggle.config("relief")[-1] == "sunken":
             self.mini_toggle.config(relief="raised")
-            self.master.geometry(f"{COLUMNNUM * COLUMNWIDTH}x{HEIGHT}")
             self.mn = False
+            self.master.geometry(f"{COLUMNNUM * COLUMNWIDTH}x{HEIGHT + status_h}")
+            self.master.update_idletasks()
+            try:
+                self.paned.sash_place(0, 0, HEIGHT)
+            except tk.TclError:
+                pass
             flog.info("UI mini mode off")
         else:
             self.mini_toggle.config(relief="sunken")
-            self.master.geometry(f"{COLUMNNUM * COLUMNWIDTH}x{MINIHEIGHT}")
             self.mn = True
+            self.master.geometry(f"{COLUMNNUM * COLUMNWIDTH}x{MINIHEIGHT + status_h}")
+            self.master.update_idletasks()
+            try:
+                self.paned.sash_place(0, 0, MINIHEIGHT)
+            except tk.TclError:
+                pass
             flog.info("UI mini mode on")
 
     def on_reset_click(self):
@@ -261,7 +379,7 @@ class RFMApp:
         try:
             self.ctrl.reset_hardware()
         except RFMError as e:
-            self.show_error_popup(e, title="Reset Error")
+            self.show_status_error(e, title="Reset Error")
             return
         self.highlighted_entry = ENTRY_HIGHLIGHTED_NONE
         self.flowSetPointBkgColors = [COLOR_BLACK] * COLUMNNUM
@@ -367,7 +485,6 @@ class RFMApp:
                     anchor="w",
                 )
         else:
-            self.master.geometry(f"{COLUMNNUM * COLUMNWIDTH}x{MINIHEIGHT}")
             font = ("Calibri Light", FONT_SIZE)
             for i in range(COLUMNNUM):
                 self.canvas.create_text(
@@ -474,12 +591,12 @@ class RFMApp:
                     if self.highlighted_entry == entry_channel and self._can_edit_channel(i):
                         ok = c.apply_changed_channel(i)
                         if not ok:
-                            self.show_error_popup(
+                            self.show_status_error(
                                 ValueError("Channel must be an integer 1-4"),
                                 title="Channel Input Error",
                             )
             except RFMError as e:
-                self.show_error_popup(e, title="Input Apply Error")
+                self.show_status_error(e, title="Input Apply Error")
         else:
             for i, entry_flowset in enumerate(entry_flowset_list):
                 if self.highlighted_entry == entry_flowset and self._can_edit_setpoint(i):
@@ -661,12 +778,13 @@ if __name__ == "__main__":
             flog.info("RFMdaemon GUI started (entering mainloop)")
             rfmapp.master.mainloop()
             flog.info("RFMdaemon mainloop exited")
+            try:
+                rfmapp.ctrl.stop_reader()
+            except Exception as e:
+                flog.caution(f"post-mainloop stop_reader: {e}")
         except RFMError as e:
             flog.critical(f"Application RFM error: {e}")
-            try:
-                messagebox.showerror("RFM Startup Error", str(e), parent=master)
-            except Exception:
-                pass
+            # Startup failed before / without a usable status pane.
             rfmapp = None
             try:
                 master.destroy()
@@ -674,10 +792,6 @@ if __name__ == "__main__":
                 pass
         except Exception as e:
             flog.critical(f"Application error: {e}")
-            try:
-                messagebox.showerror("Unexpected Error", str(e), parent=master)
-            except Exception:
-                pass
             rfmapp = None
             try:
                 master.destroy()
