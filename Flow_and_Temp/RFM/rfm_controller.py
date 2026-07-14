@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from enum import Enum
-from typing import Callable, Final, List, Optional, Sequence
+from typing import Callable, Final, List, Optional, Sequence, Tuple
 
 from RFMserial import RFMserial
 from channel import Channel, convert_int_to_channel
 from schedularwindow import Action
 from FuncLogger import FuncLogger
-from rfm_errors import RFMControllerError, RFMSerialError, RFMSerialTimeout
+from rfm_errors import RFMControllerError, RFMError, RFMSerialError, RFMSerialTimeout
 
 COLUMNNUM = 4
+# (level, message) for the GUI status pane — levels: INFO / CAUTION / ERROR / CRITICAL
+UiEvent = Tuple[str, str]
+# Minimum seconds between reader-loop iterations (UI stays free; serial I/O is off-thread).
+READER_IDLE_S = 0.05
 
 
 class ToggleState(Enum):
@@ -26,6 +31,10 @@ class RFMController:
 
     DAY_TO_HOUR: Final = 24
     HOUR_TO_MIN: Final = 60
+    # Soft timeouts: reopen after this many consecutive failed reads (~few seconds).
+    SERIAL_REOPEN_AFTER_CONSECUTIVE: Final = 5
+    # Min seconds between reopen attempts (avoid thrashing a dead port).
+    SERIAL_REOPEN_COOLDOWN_S: Final = 5.0
 
     def __init__(
         self,
@@ -38,11 +47,23 @@ class RFMController:
         self.pc_input_max = pc_input_max
         self.arduino_read_max = arduino_read_max
         self.flog = flog
+        self.port = port
+        self.serial_on = serial_on
+        self._lock = threading.RLock()
+        self._reader_stop = threading.Event()
+        self._reader_thread: Optional[threading.Thread] = None
+        self._clear_status_dedupe_pending = False
         self.last_read_time = time.time()
         self.last_schedule_handle_time_in_min = self.get_time_in_min()
         self._serial_timeout_logged = False
+        self._serial_in_fault = False
+        self._consecutive_faults = 0
+        self._last_reopen_mono = 0.0
+        self._reopen_skip_logged = False
+        self._reopen_succeeded_in_fault = False
         self._read_ok_count = 0
-        self._read_log_every = 50  # ~5s at 100ms tick — avoid flooding flog
+        self._read_log_every = 50  # avoid flooding flog
+        self._ui_events: List[UiEvent] = []
 
         self.flog.info(
             f"Controller init: port={port} serial_on={serial_on} "
@@ -52,21 +73,165 @@ class RFMController:
         self.flog.info("Opening serial")
         try:
             self.serial = RFMserial(serial_on, port, 9600)
-        except RFMSerialError:
-            self.flog.error("Opening serial failed")
-            raise
+            self.flog.info("Serial ready")
+        except RFMSerialError as e:
+            # Keep GUI alive: open a closed real handle and retry via reader reopen.
+            self.flog.error(f"Opening serial failed: {e}")
+            if not serial_on:
+                raise
+            self.serial = RFMserial(True, port, 9600, open_port=False)
+            self._serial_in_fault = True
+            self._consecutive_faults = self.SERIAL_REOPEN_AFTER_CONSECUTIVE
+            msg = (
+                f"Serial open failed at startup ({port}): {e} "
+                "— GUI stays open; retrying reopen in background"
+            )
+            self.flog.error(msg)
+            with self._lock:
+                self._ui_events.append(("ERROR", msg))
+            # First reopen attempt immediately (still no Arduino → status shows reopen failed).
+            with self._lock:
+                self._try_reopen_port(reason="startup open failed")
         except Exception as e:
             self.flog.error(f"Opening serial unexpected error: {e}")
             raise RFMControllerError(f"Failed to open serial: {e}") from e
-        self.flog.info("Serial ready")
+
+    def start_reader(self) -> None:
+        """Start background serial reader so the Tk thread never blocks on readline."""
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            return
+        self._reader_stop.clear()
+        self._reader_thread = threading.Thread(
+            target=self._reader_loop,
+            name="RFMserialReader",
+            daemon=True,
+        )
+        self._reader_thread.start()
+        self.flog.info("Serial reader thread started")
+
+    def stop_reader(self) -> None:
+        """Stop reader thread and close the serial port (best-effort)."""
+        self._reader_stop.set()
+        thread = self._reader_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=3.0)
+        self._reader_thread = None
+        with self._lock:
+            try:
+                self.serial.close()
+            except Exception as e:
+                self.flog.caution(f"Serial close on stop_reader: {e}")
+        self.flog.info("Serial reader thread stopped")
+
+    def _reader_loop(self) -> None:
+        while not self._reader_stop.is_set():
+            t0 = time.monotonic()
+            try:
+                self.read_flow_values()
+            except RFMError:
+                # Fault already logged / queued for UI; keep last values.
+                pass
+            except Exception as e:
+                self.flog.critical(f"reader loop unexpected: {e}")
+                self.emit_ui("CRITICAL", f"Reader loop error: {e}")
+            elapsed = time.monotonic() - t0
+            self._reader_stop.wait(max(0.0, READER_IDLE_S - elapsed))
+
+    def emit_ui(self, level: str, message: str) -> None:
+        """Queue a critical status line for the GUI pane."""
+        with self._lock:
+            self._ui_events.append((level, message))
+
+    def drain_ui_events(self) -> List[UiEvent]:
+        with self._lock:
+            events = self._ui_events
+            self._ui_events = []
+            return events
+
+    def get_last_flow_values(self) -> List[float]:
+        with self._lock:
+            return list(self.last_flow_values)
+
+    def get_last_read_time(self) -> float:
+        with self._lock:
+            return self.last_read_time
+
+    def consume_clear_status_dedupe(self) -> bool:
+        """True once after a successful read (GUI may clear status-line dedupe)."""
+        with self._lock:
+            pending = self._clear_status_dedupe_pending
+            self._clear_status_dedupe_pending = False
+            return pending
+
+    @staticmethod
+    def _timeout_rx_kind(exc: RFMSerialTimeout) -> str:
+        """Classify timeout as empty RX vs discarded bad frames."""
+        msg = str(exc)
+        if "| discarded:" in msg:
+            return "bad frames discarded"
+        if "| empty RX" in msg:
+            return "empty RX"
+        return "no bytes"
+
+    def _try_reopen_port(self, *, reason: str) -> bool:
+        """
+        Close and reopen the COM port. Returns True if reopen() succeeded.
+        Respects cooldown so a dead port is not hammered every tick.
+        Caller must hold self._lock.
+        """
+        now = time.monotonic()
+        if now - self._last_reopen_mono < self.SERIAL_REOPEN_COOLDOWN_S:
+            if not self._reopen_skip_logged:
+                remaining = self.SERIAL_REOPEN_COOLDOWN_S - (now - self._last_reopen_mono)
+                cooldown_s = max(1, int(remaining + 0.999))
+                msg = f"Serial reopen skipped (cooldown {cooldown_s}s, reason={reason})"
+                self.flog.caution(msg)
+                self._ui_events.append(("CAUTION", msg))
+                self._reopen_skip_logged = True
+            return False
+        self._reopen_skip_logged = False
+        self._last_reopen_mono = now
+        self.flog.caution(f"Reopening serial port {self.port} ({reason})")
+        self._ui_events.append(("CAUTION", f"Reopening serial port {self.port} ({reason})"))
+        try:
+            self.serial.reopen()
+        except RFMSerialError as e:
+            self.flog.error(f"Serial reopen failed: {e}")
+            self._ui_events.append(("ERROR", f"Serial reopen failed: {e}"))
+            return False
+        except Exception as e:
+            self.flog.error(f"Serial reopen unexpected error: {e}")
+            self._ui_events.append(("ERROR", f"Serial reopen unexpected error: {e}"))
+            return False
+        self.flog.info(f"Serial port {self.port} reopened")
+        self._ui_events.append(
+            ("INFO", f"Serial port {self.port} reopened — waiting for frame")
+        )
+        self._reopen_succeeded_in_fault = True
+        return True
+
+    def _on_serial_fault(self, *, hard: bool = False, reason: str = "fault") -> None:
+        """Track consecutive faults; soft-resync flush and optional COM reopen. Holds _lock."""
+        self._serial_in_fault = True
+        self._consecutive_faults += 1
+        if hard or self._consecutive_faults >= self.SERIAL_REOPEN_AFTER_CONSECUTIVE:
+            self._try_reopen_port(reason=reason)
+        elif not hard:
+            try:
+                self.serial.flush_input()
+            except RFMSerialError as flush_err:
+                self.flog.error(f"read_flow_values: flush after timeout failed: {flush_err}")
+                self._ui_events.append(("ERROR", f"Serial flush failed: {flush_err}"))
+                self._try_reopen_port(reason="flush failed")
 
     def reset_state(self) -> None:
-        self.flowSetPoint_Entry = [""] * COLUMNNUM
-        self.flowSetPoints_Shown = ["  Set Channel"] * COLUMNNUM
-        self.toggleStates = [ToggleState.Off] * COLUMNNUM
-        self.channels = [Channel.CH_UNKNOWN] * COLUMNNUM
-        self.channelsEntry = [""] * COLUMNNUM
-        self.last_flow_values = [0.0] * COLUMNNUM
+        with self._lock:
+            self.flowSetPoint_Entry = [""] * COLUMNNUM
+            self.flowSetPoints_Shown = ["  Set Channel"] * COLUMNNUM
+            self.toggleStates = [ToggleState.Off] * COLUMNNUM
+            self.channels = [Channel.CH_UNKNOWN] * COLUMNNUM
+            self.channelsEntry = [""] * COLUMNNUM
+            self.last_flow_values = [0.0] * COLUMNNUM
         self.flog.info("Channel state reset")
 
     def get_time_in_min(self) -> int:
@@ -87,28 +252,66 @@ class RFMController:
 
     def read_flow_values(self) -> List[float]:
         """
-        One bounded read attempt.
+        One bounded read attempt (thread-safe).
 
         On success updates last_flow_values and returns them.
-        On serial/controller failure: logs, then re-raises so GUI can popup.
+        On serial/controller failure: logs (+ UI event once per fault), then re-raises.
+        After several consecutive soft timeouts (or any hard I/O error), reopens the COM port.
         """
+        with self._lock:
+            return self._read_flow_values_unlocked()
+
+    def _read_flow_values_unlocked(self) -> List[float]:
         try:
             serial_buffer = self.serial.readline_serial()
         except RFMSerialTimeout as e:
+            fault_n = self._consecutive_faults + 1
+            rx_kind = self._timeout_rx_kind(e)
             if not self._serial_timeout_logged:
                 self.flog.caution(f"read_flow_values: {e}")
+                self._ui_events.append(("CAUTION", f"Serial timeout — retrying. {e}"))
                 self._serial_timeout_logged = True
+            elif fault_n % self.SERIAL_REOPEN_AFTER_CONSECUTIVE == 0:
+                hb = (
+                    f"Serial timeout heartbeat fault#={fault_n} ({rx_kind}) — retrying"
+                )
+                self.flog.caution(f"read_flow_values: {hb}")
+                self._ui_events.append(("CAUTION", hb))
+            self._on_serial_fault(
+                hard=False, reason=f"{fault_n} consecutive timeouts"
+            )
             raise
         except RFMSerialError as e:
             self.flog.error(f"read_flow_values: serial error: {e}")
+            self._ui_events.append(("ERROR", f"Serial error: {e}"))
+            self._on_serial_fault(hard=True, reason="I/O error")
             raise
         except Exception as e:
             self.flog.error(f"read_flow_values: unexpected: {e}")
+            self._ui_events.append(("ERROR", f"Serial read failed: {e}"))
+            self._on_serial_fault(hard=True, reason="unexpected read error")
             raise RFMControllerError(f"Serial read failed: {e}") from e
 
-        if self._serial_timeout_logged:
-            self.flog.info("read_flow_values: serial recovered after timeout")
+        if self._serial_in_fault or self._serial_timeout_logged:
+            faults_before = self._consecutive_faults
+            reopen_part = " after reopen" if self._reopen_succeeded_in_fault else ""
+            self.flog.info(
+                f"read_flow_values: serial recovered after {faults_before} faults"
+                f"{reopen_part} raw={serial_buffer}"
+            )
+            self._ui_events.append(
+                (
+                    "INFO",
+                    f"Serial recovered after {faults_before} faults{reopen_part}"
+                    f" — valid {len(serial_buffer)}-digit frame",
+                )
+            )
         self._serial_timeout_logged = False
+        self._serial_in_fault = False
+        self._consecutive_faults = 0
+        self._reopen_skip_logged = False
+        self._reopen_succeeded_in_fault = False
+        self._clear_status_dedupe_pending = True
 
         try:
             flows = self.parse_flow_serial_buffer(serial_buffer)
@@ -127,11 +330,15 @@ class RFMController:
                     f"len={len(serial_buffer)} raw={serial_buffer}"
                 )
             return flow_values
-        except RFMControllerError:
-            self.flog.caution("read_flow_values: parse error")
+        except RFMControllerError as e:
+            self._serial_in_fault = True
+            self.flog.caution(f"read_flow_values: parse error: {e}")
+            self._ui_events.append(("CAUTION", f"Parse error: {e}"))
             raise
         except Exception as e:
+            self._serial_in_fault = True
             self.flog.caution(f"read_flow_values: parse error: {e}")
+            self._ui_events.append(("CAUTION", f"Parse error: {e}"))
             raise RFMControllerError(f"Failed to parse flow values: {e}") from e
 
     def is_valid_flow_setpoint(self, flow_setpoint_entry: str) -> bool:
@@ -156,7 +363,10 @@ class RFMController:
             f"setpoint ch{index}: write {self.flowSetPoint_Entry[index]} -> {self.channels[index]}"
         )
         try:
-            self.serial.writeFlowSetpoint_serial(self.flowSetPoint_Entry[index], self.channels[index])
+            with self._lock:
+                self.serial.writeFlowSetpoint_serial(
+                    self.flowSetPoint_Entry[index], self.channels[index]
+                )
         except RFMSerialError as e:
             self.flog.error(f"setpoint ch{index}: serial write failed: {e}")
             raise
@@ -181,7 +391,6 @@ class RFMController:
         self.channelsEntry[index] = ""
         self.channels[index] = channel
         self.flowSetPoints_Shown[index] = "paused"
-        # Leave SelectChannel (need-channel-first) so channel input / On work again.
         if self.toggleStates[index] == ToggleState.SelectChannel:
             self.toggleStates[index] = ToggleState.Off
         self.flog.info(f"channel map col{index} -> {self.channels[index].value}")
@@ -199,8 +408,9 @@ class RFMController:
             self.flowSetPoint_Entry[switch_index] = ""
             self.flog.info(f"toggle col{switch_index}: Off -> {self.channels[switch_index]}")
             try:
-                self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
-                self.serial.writeChannelOff_serial(self.channels[switch_index])
+                with self._lock:
+                    self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
+                    self.serial.writeChannelOff_serial(self.channels[switch_index])
             except RFMSerialError as e:
                 self.flog.error(f"toggle Off serial failed: {e}")
                 raise
@@ -209,7 +419,6 @@ class RFMController:
                 raise RFMControllerError(f"Channel Off failed: {e}") from e
         else:
             if self.channels[switch_index] == Channel.CH_UNKNOWN:
-                # SelectChannel: button stays Off; channel digits are accepted until mapped.
                 self.toggleStates[switch_index] = ToggleState.SelectChannel
                 self.flowSetPoints_Shown[switch_index] = "Set Channel"
                 self.flog.caution(f"toggle col{switch_index}: need channel first (SelectChannel)")
@@ -219,8 +428,9 @@ class RFMController:
             self.flowSetPoints_Shown[switch_index] = "0"
             self.flog.info(f"toggle col{switch_index}: On -> {self.channels[switch_index]}")
             try:
-                self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
-                self.serial.writeChannelOn_serial(self.channels[switch_index])
+                with self._lock:
+                    self.serial.writeFlowSetpoint_serial("0", self.channels[switch_index])
+                    self.serial.writeChannelOn_serial(self.channels[switch_index])
             except RFMSerialError as e:
                 self.flog.error(f"toggle On serial failed: {e}")
                 raise
@@ -232,7 +442,8 @@ class RFMController:
         self.flog.info("RESET: state + serial")
         self.reset_state()
         try:
-            self.serial.reset_serial()
+            with self._lock:
+                self.serial.reset_serial()
         except RFMSerialError as e:
             self.flog.error(f"RESET serial failed: {e}")
             raise
