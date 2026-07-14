@@ -52,7 +52,9 @@ def test_controller_no_tk() -> None:
     daemon_src = open(os.path.join(RFM_DIR, "RFMdaemon.py"), encoding="utf-8").read()
     check("RFMdaemon imports RFMController", "from rfm_controller import" in daemon_src)
     check("RFMdaemon imports rfm_errors", "from rfm_errors import" in daemon_src)
-    check("RFMdaemon uses messagebox", "messagebox" in daemon_src)
+    check("RFMdaemon has no messagebox import", "messagebox.show" not in daemon_src and "import messagebox" not in daemon_src)
+    check("RFMdaemon uses PanedWindow", "PanedWindow" in daemon_src)
+    check("RFMdaemon append_status defined in source", "def append_status" in daemon_src)
 
 
 def test_sim_controller_happy_path() -> None:
@@ -96,11 +98,15 @@ def test_serial_timeout_raises() -> None:
         DEFAULT_READ_TIMEOUT_S,
         EXPECTED_LINE_LEN,
         RFMserial_Real,
+        is_valid_flow_line,
     )
 
     check("read timeout configured", DEFAULT_READ_TIMEOUT_S > 0 and DEFAULT_READ_TIMEOUT_S <= 1.0)
     check("overall timeout configured", DEFAULT_OVERALL_READ_TIMEOUT_S > DEFAULT_READ_TIMEOUT_S)
     check("expected line len is 34", EXPECTED_LINE_LEN == 34)
+    check("valid 34-digit accepted", is_valid_flow_line("0" * 34))
+    check("16-digit rejected", not is_valid_flow_line("0" * 16))
+    check("non-digit rejected", not is_valid_flow_line("a" * 34))
 
     # Fake Real-like object: empty reads until deadline → RFMSerialTimeout
     class EmptyPort:
@@ -124,8 +130,25 @@ def test_serial_timeout_raises() -> None:
     elapsed = time.monotonic() - t0
 
     check("readline raises RFMSerialTimeout", isinstance(raised, RFMSerialTimeout), repr(raised))
+    check("empty port timeout says empty RX", isinstance(raised, RFMSerialTimeout) and "empty RX" in str(raised))
     check("timeout completes under 2s (no hang)", elapsed < 2.0, f"elapsed={elapsed:.2f}s")
     check("timeout waited roughly overall_timeout", 0.25 <= elapsed <= 1.5, f"elapsed={elapsed:.2f}s")
+
+    # Resync: discard junk then accept first valid frame
+    class JunkThenGoodPort:
+        def __init__(self):
+            self.n = 0
+
+        def read_until(self, expected=b"\n"):
+            self.n += 1
+            if self.n < 3:
+                return b"partial\n"
+            return (("0" * 34) + "\n").encode("ascii")
+
+    synced = RFMserial_Real.__new__(RFMserial_Real)
+    synced.ser = JunkThenGoodPort()
+    line = synced.readline_serial(overall_timeout=1.0)
+    check("resync accepts first valid 34-digit frame", line == "0" * 34, repr(line))
 
 
 def test_error_propagation_controller() -> None:
@@ -137,6 +160,8 @@ def test_error_propagation_controller() -> None:
     class FakeSerial:
         def __init__(self):
             self.mode = "timeout"
+            self.flush_count = 0
+            self.reopen_count = 0
 
         def readline_serial(self, overall_timeout=0.8):
             if self.mode == "timeout":
@@ -146,6 +171,12 @@ def test_error_propagation_controller() -> None:
             if self.mode == "bad":
                 return "not-a-valid-payload"
             return "0000000000000000000000000000000000"
+
+        def flush_input(self):
+            self.flush_count += 1
+
+        def reopen(self):
+            self.reopen_count += 1
 
         def writeFlowSetpoint_serial(self, *a, **k):
             raise RFMSerialError("write fail")
@@ -161,6 +192,9 @@ def test_error_propagation_controller() -> None:
 
     flog = FuncLogger("flowtemp", "RFM_test")
     c = RFMController(False, "COM99", 99, 4095, flog)
+    # Speed up reopen tests (avoid waiting on real cooldown/threshold).
+    c.SERIAL_REOPEN_AFTER_CONSECUTIVE = 3
+    c.SERIAL_REOPEN_COOLDOWN_S = 0.0
     fake = FakeSerial()
     c.serial = fake
 
@@ -172,7 +206,40 @@ def test_error_propagation_controller() -> None:
         check("timeout re-raised as RFMSerialTimeout", True)
     except Exception as e:
         check("timeout re-raised as RFMSerialTimeout", False, repr(e))
+    check("timeout flushes input for resync", fake.flush_count >= 1, str(fake.flush_count))
+    check("first timeouts do not reopen yet", fake.reopen_count == 0, str(fake.reopen_count))
+    ev = c.drain_ui_events()
+    check("timeout emits UI CAUTION", any(lvl == "CAUTION" for lvl, _ in ev), str(ev))
 
+    # Hit reopen threshold with consecutive soft timeouts.
+    for _ in range(2):
+        try:
+            c.read_flow_values()
+        except RFMSerialTimeout:
+            pass
+    check("reopens after consecutive timeouts", fake.reopen_count >= 1, str(fake.reopen_count))
+    ev_reopen = c.drain_ui_events()
+    check(
+        "reopen emits UI events",
+        any("reopen" in msg.lower() for _, msg in ev_reopen),
+        str(ev_reopen),
+    )
+
+    fake.mode = "ok"
+    vals = c.read_flow_values()
+    check("recovery read returns 4 floats", len(vals) == 4)
+    ev2 = c.drain_ui_events()
+    check(
+        "recovery emits UI INFO with fault count",
+        any(
+            lvl == "INFO" and "recovered" in msg.lower() and "after 3 faults" in msg
+            for lvl, msg in ev2
+        ),
+        str(ev2),
+    )
+    check("fault counter cleared after recovery", c._consecutive_faults == 0)
+
+    reopen_before_io = fake.reopen_count
     fake.mode = "io"
     try:
         c.read_flow_values()
@@ -181,6 +248,7 @@ def test_error_propagation_controller() -> None:
         check("serial I/O re-raised as RFMSerialError", not isinstance(e, RFMSerialTimeout))
     except Exception as e:
         check("serial I/O re-raised as RFMSerialError", False, repr(e))
+    check("I/O error triggers immediate reopen", fake.reopen_count > reopen_before_io, str(fake.reopen_count))
 
     fake.mode = "bad"
     try:
@@ -211,7 +279,7 @@ def test_error_propagation_controller() -> None:
 
 
 def test_gui_error_helpers_exist() -> None:
-    print("\n[6] GUI error popup wiring (source-level)")
+    print("\n[6] GUI status pane wiring (source-level)")
     src = open(os.path.join(RFM_DIR, "RFMdaemon.py"), encoding="utf-8").read()
     tree = ast.parse(src)
     methods = {
@@ -219,10 +287,13 @@ def test_gui_error_helpers_exist() -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
     }
-    check("show_error_popup defined", "show_error_popup" in methods)
-    check("clear_error_popup_dedupe defined", "clear_error_popup_dedupe" in methods)
-    check("main_loop catches RFMError", "except RFMError" in src)
-    check("run_app catches RFMError on startup", src.count("except RFMError") >= 2)
+    check("append_status defined", "append_status" in methods)
+    check("clear_status_dedupe defined", "clear_status_dedupe" in methods)
+    check("show_status_error defined", "show_status_error" in methods)
+    check("start_reader defined on controller", "def start_reader" in open(os.path.join(RFM_DIR, "rfm_controller.py"), encoding="utf-8").read())
+    check("GUI does not call read_flow_values in update", "read_flow_values" not in src.split("def update(self):")[1].split("def ")[0])
+    check("run_app catches RFMError on startup", src.count("except RFMError") >= 1)
+    check("no show_error_popup", "show_error_popup" not in methods)
 
 
 def test_makefile_and_conflict_cleanup() -> None:
@@ -343,6 +414,212 @@ def test_gui_input_fixes() -> None:
     check("cannot edit setpoint in SelectChannel", app._can_edit_setpoint(0) is False)
 
 
+def test_reader_thread_api() -> None:
+    print("\n[10] Background serial reader thread")
+    from FuncLogger import FuncLogger
+    from rfm_controller import RFMController, READER_IDLE_S
+
+    flog = FuncLogger("flowtemp", "RFM_test")
+    c = RFMController(False, "COM99", 99, 4095, flog)
+    check("READER_IDLE_S positive", READER_IDLE_S > 0)
+    c.start_reader()
+    check("reader thread alive", c._reader_thread is not None and c._reader_thread.is_alive())
+    time.sleep(0.2)
+    vals = c.get_last_flow_values()
+    check("reader produced 4 values", len(vals) == 4, str(vals))
+    c.stop_reader()
+    check("reader stopped", c._reader_thread is None or not c._reader_thread.is_alive())
+    # Sync API still works after stop (port closed — sim close is no-op; reopen for sync test)
+    c.serial.reopen()
+    vals2 = c.read_flow_values()
+    check("sync read_flow_values still works", len(vals2) == 4)
+
+
+def test_logging_improvements() -> None:
+    print("\n[11] Logging improvements (heartbeat, cooldown skip, recovery detail)")
+    from FuncLogger import FuncLogger
+    from rfm_controller import RFMController
+    from rfm_errors import RFMSerialError, RFMSerialTimeout
+
+    class FakeSerial:
+        def __init__(self):
+            self.mode = "timeout"
+            self.flush_count = 0
+            self.reopen_count = 0
+            self.timeout_kind = "empty"
+
+        def readline_serial(self, overall_timeout=0.8):
+            if self.mode == "timeout":
+                if self.timeout_kind == "discarded":
+                    raise RFMSerialTimeout(
+                        "Serial read timeout (0.8s): no complete 34-digit line"
+                        " | discarded: len=8 raw='partial'"
+                    )
+                raise RFMSerialTimeout(
+                    "Serial read timeout (0.8s): no complete 34-digit line | empty RX"
+                )
+            if self.mode == "io":
+                raise RFMSerialError("port gone")
+            return "0000000000000000000000000000000000"
+
+        def flush_input(self):
+            self.flush_count += 1
+
+        def reopen(self):
+            self.reopen_count += 1
+
+        def writeFlowSetpoint_serial(self, *a, **k):
+            pass
+
+        def writeChannelOn_serial(self, *a, **k):
+            pass
+
+        def writeChannelOff_serial(self, *a, **k):
+            pass
+
+        def reset_serial(self):
+            pass
+
+    flog = FuncLogger("flowtemp", "RFM_test")
+    c = RFMController(False, "COM99", 99, 4095, flog)
+    c.SERIAL_REOPEN_AFTER_CONSECUTIVE = 5
+    c.SERIAL_REOPEN_COOLDOWN_S = 0.0
+    fake = FakeSerial()
+    c.serial = fake
+
+    # Heartbeat at fault#=5 (empty RX)
+    for _ in range(5):
+        try:
+            c.read_flow_values()
+        except RFMSerialTimeout:
+            pass
+    ev_hb = c.drain_ui_events()
+    check(
+        "timeout heartbeat includes fault#=5",
+        any("fault#=5" in msg for _, msg in ev_hb),
+        str(ev_hb),
+    )
+    check(
+        "heartbeat distinguishes empty RX",
+        any("empty RX" in msg for _, msg in ev_hb),
+        str(ev_hb),
+    )
+
+    # Discarded bad frames wording
+    fake.timeout_kind = "discarded"
+    for _ in range(5):
+        try:
+            c.read_flow_values()
+        except RFMSerialTimeout:
+            pass
+    ev_disc = c.drain_ui_events()
+    check(
+        "heartbeat distinguishes discarded frames",
+        any("bad frames discarded" in msg for _, msg in ev_disc),
+        str(ev_disc),
+    )
+
+    # Cooldown skip — reopen on every fault, long cooldown blocks 2nd attempt
+    c2 = RFMController(False, "COM99", 99, 4095, flog)
+    c2.SERIAL_REOPEN_AFTER_CONSECUTIVE = 1
+    c2.SERIAL_REOPEN_COOLDOWN_S = 60.0
+    fake2 = FakeSerial()
+    c2.serial = fake2
+    for _ in range(2):
+        try:
+            c2.read_flow_values()
+        except RFMSerialTimeout:
+            pass
+    ev_skip = c2.drain_ui_events()
+    check(
+        "cooldown skip emits CAUTION once",
+        sum(1 for _, msg in ev_skip if "reopen skipped" in msg) == 1,
+        str(ev_skip),
+    )
+    check(
+        "cooldown skip message includes reason",
+        any("reason=" in msg for _, msg in ev_skip if "reopen skipped" in msg),
+        str(ev_skip),
+    )
+
+    # Recovery after reopen mentions fault count + reopen
+    c3 = RFMController(False, "COM99", 99, 4095, flog)
+    c3.SERIAL_REOPEN_AFTER_CONSECUTIVE = 2
+    c3.SERIAL_REOPEN_COOLDOWN_S = 0.0
+    fake3 = FakeSerial()
+    c3.serial = fake3
+    for _ in range(2):
+        try:
+            c3.read_flow_values()
+        except RFMSerialTimeout:
+            pass
+    c3.drain_ui_events()
+    fake3.mode = "ok"
+    c3.read_flow_values()
+    ev_rec = c3.drain_ui_events()
+    check(
+        "recovery mentions fault count",
+        any("after 2 faults" in msg for _, msg in ev_rec),
+        str(ev_rec),
+    )
+    check(
+        "recovery mentions after reopen",
+        any("after reopen" in msg for _, msg in ev_rec),
+        str(ev_rec),
+    )
+
+
+def test_startup_open_failure_keeps_gui_path() -> None:
+    print("\n[12] Startup COM open failure does not abort controller")
+    from FuncLogger import FuncLogger
+    from rfm_controller import RFMController
+    from RFMserial import RFMserial, RFMserial_Real
+
+    # Deferred open: construct without touching hardware
+    closed = RFMserial_Real("COM_NONE", 9600, open_port=False)
+    check("deferred Real has ser=None", closed.ser is None)
+    try:
+        closed.readline_serial(overall_timeout=0.2)
+        check("closed Real read raises", False)
+    except Exception as e:
+        from rfm_errors import RFMSerialError
+
+        check("closed Real read is RFMSerialError", isinstance(e, RFMSerialError), repr(e))
+
+    # Controller: force first open to fail by patching RFMserial temporarily
+    import rfm_controller as rc_mod
+
+    real_cls = rc_mod.RFMserial
+    calls = {"n": 0}
+
+    class BoomThenClosed:
+        def __init__(self, on, port, baudrate, timeout=0.25, *, open_port=True):
+            calls["n"] += 1
+            if open_port and on:
+                from rfm_errors import RFMSerialError
+
+                raise RFMSerialError(f"Failed to open serial port {port}: missing")
+            self._inner = real_cls(on, port, baudrate, timeout=timeout, open_port=False)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    flog = FuncLogger("flowtemp", "RFM_test")
+    rc_mod.RFMserial = BoomThenClosed
+    try:
+        c = RFMController(True, "COM99", 99, 4095, flog)
+        check("controller survives open failure", True)
+        ev = c.drain_ui_events()
+        check(
+            "startup open failure queued for UI",
+            any("open failed at startup" in msg.lower() for _, msg in ev),
+            str(ev),
+        )
+        check("fallback serial constructed", calls["n"] >= 2, str(calls["n"]))
+    finally:
+        rc_mod.RFMserial = real_cls
+
+
 def main() -> int:
     print("=== RFM change verification ===")
     tests = [
@@ -355,6 +632,9 @@ def main() -> int:
         test_makefile_and_conflict_cleanup,
         test_syntax_all_modules,
         test_gui_input_fixes,
+        test_reader_thread_api,
+        test_logging_improvements,
+        test_startup_open_failure_keeps_gui_path,
     ]
     for fn in tests:
         try:
